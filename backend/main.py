@@ -4,9 +4,9 @@ FastAPI backend for syft-reviewer-allowlist with SyftBox integration
 
 import os
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Union
 
-from fastapi import FastAPI, Depends, HTTPException, Body, Path
+from fastapi import FastAPI, Depends, HTTPException, Body, Path, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -17,7 +17,7 @@ from syft_core import Client
 from .models import (
     AllowlistResponse, AllowlistUpdateRequest, MessageResponse,
     JobHistoryResponse, JobHistoryItem, TrustedCodeResponse, TrustedCodeItem,
-    JobSignatureRequest, JobSignatureResponse
+    JobSignatureRequest, JobSignatureResponse, JobActionRequest
 )
 from .utils import (
     get_allowlist, 
@@ -35,6 +35,41 @@ from .utils import (
     is_job_trusted_code,
     calculate_job_signature
 )
+
+try:
+    import syft_code_queue as q
+except ImportError:
+    logger.error("syft-code-queue not available - job browsing features will be limited")
+    q = None
+
+
+# Helper functions
+def _get_file_type(file_path: str) -> str:
+    """Determine file type based on extension."""
+    file_path = str(file_path).lower()
+    
+    if file_path.endswith(('.py', '.pyw')):
+        return 'python'
+    elif file_path.endswith(('.js', '.mjs')):
+        return 'javascript'
+    elif file_path.endswith('.ts'):
+        return 'typescript'
+    elif file_path.endswith('.sh'):
+        return 'shell'
+    elif file_path.endswith('.md'):
+        return 'markdown'
+    elif file_path.endswith('.json'):
+        return 'json'
+    elif file_path.endswith(('.yml', '.yaml')):
+        return 'yaml'
+    elif file_path.endswith('.sql'):
+        return 'sql'
+    elif file_path.endswith('.csv'):
+        return 'csv'
+    elif file_path.endswith(('.txt', '.log')):
+        return 'text'
+    else:
+        return 'text'
 
 
 # Initialize SyftBox connection
@@ -90,7 +125,8 @@ async def get_status(client: Client = Depends(get_client)) -> Dict[str, Any]:
             "backend": "running",
             "allowlist": "available",
             "storage": "individual_files",
-            "trusted_code": "available"
+            "trusted_code": "available",
+            "job_browser": "enabled" if q else "disabled"
         }
     }
 
@@ -436,6 +472,166 @@ async def add_job_to_history_endpoint(
     except Exception as e:
         logger.error(f"Error adding job to history: {e}")
         raise HTTPException(status_code=500, detail="Failed to add job to history")
+
+
+# Job Browser Endpoints
+
+@app.get("/api/v1/jobs/history-for-review")
+async def get_job_history_for_review(client: Client = Depends(get_client)):
+    """Get job history for code review and trusted code management."""
+    try:
+        job_history = get_job_history(client, limit=50)  # Get more jobs for review
+        
+        # Add trusted code status to each job
+        trusted_patterns = get_trusted_code_list(client)
+        trusted_signatures = {item["signature"] for item in trusted_patterns}
+        
+        for job in job_history:
+            job["is_trusted"] = job["signature"] in trusted_signatures
+        
+        return {
+            "jobs": job_history,
+            "total_count": len(job_history)
+        }
+    
+    except Exception as e:
+        logger.error(f"Error getting job history for review: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get job history: {str(e)}")
+
+
+@app.get("/api/v1/jobs/history/{signature}/files")
+async def get_job_files_from_history(signature: str, client: Client = Depends(get_client)):
+    """Get file listing for a job from history by signature."""
+    try:
+        job_history = get_job_history(client, limit=100)
+        
+        # Find the job with matching signature
+        target_job = None
+        for job in job_history:
+            if job["signature"] == signature:
+                target_job = job
+                break
+        
+        if not target_job:
+            raise HTTPException(status_code=404, detail="Job not found in history")
+        
+        # Extract file information from job data
+        files = []
+        code_files = target_job.get("code_files", {})
+        
+        if isinstance(code_files, dict):
+            for file_path, content in code_files.items():
+                file_info = {
+                    "path": file_path,
+                    "name": PathLib(file_path).name,
+                    "size": len(str(content)) if content else 0,
+                    "type": _get_file_type(file_path)
+                }
+                files.append(file_info)
+        elif isinstance(code_files, list):
+            for file_path in code_files:
+                file_info = {
+                    "path": file_path,
+                    "name": PathLib(file_path).name,
+                    "size": 0,  # Size unknown for file paths only
+                    "type": _get_file_type(file_path)
+                }
+                files.append(file_info)
+        
+        return {"files": files}
+    
+    except Exception as e:
+        logger.error(f"Error getting job files from history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get job files: {str(e)}")
+
+
+@app.get("/api/v1/jobs/history/{signature}/files/{file_path:path}")
+async def get_job_file_content_from_history(signature: str, file_path: str, client: Client = Depends(get_client)):
+    """Get content of a specific file from a job in history."""
+    try:
+        job_history = get_job_history(client, limit=100)
+        
+        # Find the job with matching signature
+        target_job = None
+        for job in job_history:
+            if job["signature"] == signature:
+                target_job = job
+                break
+        
+        if not target_job:
+            raise HTTPException(status_code=404, detail="Job not found in history")
+        
+        # Get file content from job data
+        code_files = target_job.get("code_files", {})
+        content = None
+        
+        if isinstance(code_files, dict):
+            content = code_files.get(file_path)
+        
+        if content is None:
+            raise HTTPException(status_code=404, detail="File not found in job history")
+        
+        return {
+            "content": str(content),
+            "file_path": file_path,
+            "file_type": _get_file_type(file_path),
+            "size": len(str(content))
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting job file content from history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get file content: {str(e)}")
+
+
+@app.post("/api/v1/jobs/history/{signature}/mark-trusted")
+async def mark_job_as_trusted_from_history(signature: str, client: Client = Depends(get_client)):
+    """Mark a job from history as trusted code."""
+    try:
+        # Mark as trusted - the function will check if the job exists in history
+        mark_job_as_trusted_code(client, signature)
+        
+        logger.info(f"🔒 Marked job as trusted code: {signature[:12]}... (Manual marking from code review)")
+        return MessageResponse(message=f"Job marked as trusted code")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking job as trusted: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to mark as trusted: {str(e)}")
+
+
+@app.post("/api/v1/jobs/history/refresh-content")
+async def refresh_job_content(client: Client = Depends(get_client)):
+    """Refresh job history content (convert filename lists to demo content)."""
+    try:
+        from .utils import get_job_history_dir_path, store_job_in_history
+        import json
+        
+        history_dir = get_job_history_dir_path(client)
+        if not history_dir.exists():
+            return MessageResponse(message="No job history found")
+        
+        refreshed_count = 0
+        for job_file in history_dir.glob("*.json"):
+            try:
+                job_data = json.loads(job_file.read_text())
+                
+                # Check if code_files is a list (filenames only)
+                if isinstance(job_data.get("code_files"), list):
+                    # Re-store the job to trigger content population
+                    store_job_in_history(client, job_data)
+                    refreshed_count += 1
+                    
+            except Exception as e:
+                logger.warning(f"Could not refresh job {job_file.name}: {e}")
+        
+        return MessageResponse(message=f"Refreshed {refreshed_count} job(s) with demo content")
+    
+    except Exception as e:
+        logger.error(f"Error refreshing job content: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to refresh content: {str(e)}")
 
 
 # Serve the HTML interface

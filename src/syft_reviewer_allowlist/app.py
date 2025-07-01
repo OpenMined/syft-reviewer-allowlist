@@ -11,7 +11,7 @@ import signal
 import sys
 from datetime import datetime
 from time import sleep
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
 
 from loguru import logger
 
@@ -74,6 +74,7 @@ class ReviewerAllowlistApp:
             self.syftbox_client = SyftBoxClient.load()
             self.poll_interval = poll_interval
             self.allowlist = self._load_allowlist()
+            self.processed_job_ids: Set[str] = set()  # Track jobs we've already stored in history
             
             log_to_syftui(f"✅ Initialized Reviewer Allowlist App for {self.email}")
             log_to_syftui(f"📝 Trusted senders: {', '.join(self.allowlist)}")
@@ -86,6 +87,7 @@ class ReviewerAllowlistApp:
             self.syftbox_client = SyftBoxClient()
             self.poll_interval = poll_interval
             self.allowlist = ["andrew@openmined.org"]  # Fallback default
+            self.processed_job_ids: Set[str] = set()
     
     @property
     def email(self) -> str:
@@ -131,33 +133,89 @@ class ReviewerAllowlistApp:
             # Get basic job information
             job_data = {
                 "name": getattr(job, 'name', ''),
-                "description": getattr(job, 'description', ''),
-                "tags": getattr(job, 'tags', []),
+                "description": getattr(job, 'description', '') or '',
+                "tags": getattr(job, 'tags', []) or [],
                 "requester_email": getattr(job, 'requester_email', ''),
+                "created_at": getattr(job, 'created_at', None),
+                "uid": str(getattr(job, 'uid', '')),
                 "code_files": {}
             }
             
-            # Try to get code files if available
+            # Try to get code files using various approaches
+            code_files_found = False
+            
             try:
+                # Method 1: Try get_review_data
                 if hasattr(job, 'get_review_data'):
                     review_data = job.get_review_data()
                     if review_data and 'code_files' in review_data:
                         job_data['code_files'] = review_data['code_files']
-                elif hasattr(job, 'code_folder') and job.code_folder:
-                    # Try to read code files directly
-                    from pathlib import Path
-                    code_folder = Path(job.code_folder)
-                    if code_folder.exists():
-                        for code_file in code_folder.rglob('*'):
-                            if code_file.is_file():
-                                try:
-                                    relative_path = str(code_file.relative_to(code_folder))
-                                    job_data['code_files'][relative_path] = code_file.read_text(encoding='utf-8', errors='ignore')
-                                except Exception:
-                                    # Skip files that can't be read
-                                    pass
+                        code_files_found = True
             except Exception as e:
-                log_to_syftui(f"⚠️ Could not extract code files for job '{job_data['name']}': {e}", "WARN")
+                log_to_syftui(f"⚠️ Method 1 (get_review_data) failed: {e}", "WARN")
+            
+            if not code_files_found:
+                try:
+                    # Method 2: Try list_files and read_file
+                    if hasattr(job, 'list_files') and hasattr(job, 'read_file'):
+                        files = job.list_files()
+                        if files:
+                            for filename in files:
+                                try:
+                                    content = job.read_file(filename)
+                                    if content:
+                                        job_data['code_files'][filename] = content
+                                        code_files_found = True
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+            
+            if not code_files_found:
+                try:
+                    # Method 3: Try code_folder direct access
+                    if hasattr(job, 'code_folder') and job.code_folder:
+                        from pathlib import Path
+                        code_folder = Path(job.code_folder)
+                        if code_folder.exists():
+                            for code_file in code_folder.rglob('*'):
+                                if code_file.is_file():
+                                    try:
+                                        relative_path = str(code_file.relative_to(code_folder))
+                                        content = code_file.read_text(encoding='utf-8', errors='ignore')
+                                        job_data['code_files'][relative_path] = content
+                                        code_files_found = True
+                                    except Exception:
+                                        pass
+                except Exception:
+                    pass
+            
+            if not code_files_found:
+                try:
+                    # Method 4: Try accessing job directory via syft-code-queue client
+                    if hasattr(q, 'client') and hasattr(q.client, '_get_job_dir'):
+                        job_dir = q.client._get_job_dir(job)
+                        code_dir = job_dir / "code"
+                        if code_dir.exists():
+                            for code_file in code_dir.rglob('*'):
+                                if code_file.is_file():
+                                    try:
+                                        relative_path = str(code_file.relative_to(code_dir))
+                                        content = code_file.read_text(encoding='utf-8', errors='ignore')
+                                        job_data['code_files'][relative_path] = content
+                                        code_files_found = True
+                                    except Exception:
+                                        pass
+                except Exception:
+                    pass
+            
+            if not code_files_found:
+                # Final fallback: Check if code_files is already a list of filenames
+                if hasattr(job, 'code_files'):
+                    code_files_attr = getattr(job, 'code_files')
+                    if isinstance(code_files_attr, list):
+                        # Store as list for now (filenames only - will be converted to demo content during storage)
+                        job_data['code_files'] = code_files_attr
             
             return job_data
             
@@ -168,6 +226,8 @@ class ReviewerAllowlistApp:
                 "description": "",
                 "tags": [],
                 "requester_email": getattr(job, 'requester_email', ''),
+                "created_at": None,
+                "uid": str(getattr(job, 'uid', '')),
                 "code_files": {}
             }
     
@@ -175,11 +235,43 @@ class ReviewerAllowlistApp:
         """Store a completed job in history for potential trusted code marking."""
         try:
             if store_job_in_history is not None:
+                job_id = str(getattr(job, 'uid', ''))
+                
+                # Skip if we've already processed this job
+                if job_id in self.processed_job_ids:
+                    return
+                
                 job_data = self._extract_job_data(job)
                 signature = store_job_in_history(self.syftbox_client, job_data)
+                self.processed_job_ids.add(job_id)
+                
                 log_to_syftui(f"📚 Stored job in history: {job_data['name']} -> {signature[:12]}...")
         except Exception as e:
             log_to_syftui(f"⚠️ Could not store job in history: {e}", "WARN")
+    
+    def _check_and_store_completed_jobs(self):
+        """Check for completed jobs and store them in history."""
+        try:
+            # Get all completed jobs that I've approved
+            completed_jobs = q.approved_by_me.completed()
+            
+            if not completed_jobs:
+                return
+            
+            new_completed_count = 0
+            for job in completed_jobs:
+                job_id = str(getattr(job, 'uid', ''))
+                
+                # Skip if we've already processed this job
+                if job_id not in self.processed_job_ids:
+                    self._store_completed_job_in_history(job)
+                    new_completed_count += 1
+            
+            if new_completed_count > 0:
+                log_to_syftui(f"📚 Found and stored {new_completed_count} new completed job(s) in history")
+                
+        except Exception as e:
+            log_to_syftui(f"⚠️ Error checking completed jobs: {e}", "WARN")
     
     def run(self):
         """
@@ -187,6 +279,7 @@ class ReviewerAllowlistApp:
         """
         log_to_syftui(f"🔄 Starting continuous job polling...")
         log_to_syftui(f"⏰ Checking every {self.poll_interval} second(s) for jobs from trusted senders and trusted code")
+        log_to_syftui(f"📚 Will also monitor for completed jobs to store in history")
         
         # Set up graceful shutdown
         def signal_handler(signum, frame):
@@ -225,6 +318,10 @@ class ReviewerAllowlistApp:
         # Refresh allowlist every 30 seconds (30 cycles at 1s intervals)
         if cycle % 30 == 0:
             self._refresh_allowlist()
+        
+        # Check for completed jobs every 10 seconds (10 cycles at 1s intervals)
+        if cycle % 10 == 0:
+            self._check_and_store_completed_jobs()
         
         # Check for pending jobs and auto-approve from allowlist or trusted code
         self._auto_approve_jobs(verbose_logging=verbose_logging)
@@ -333,11 +430,6 @@ class ReviewerAllowlistApp:
             
             if success:
                 log_to_syftui(f"✅ Approved: '{job.name}' from {job.requester_email} ({reason})")
-                
-                # Store completed jobs in history for potential trusted code marking
-                if job.status.value == 'completed':
-                    self._store_completed_job_in_history(job)
-                    
                 return True
             else:
                 log_to_syftui(f"❌ Failed to approve: '{job.name}' from {job.requester_email}", "ERROR")
@@ -355,6 +447,7 @@ def main():
     log_to_syftui("=" * 60)
     log_to_syftui("📝 Email allowlist managed via web UI")
     log_to_syftui("🔒 Trusted code patterns managed via web UI")
+    log_to_syftui("📚 Completed jobs automatically stored in history")
     log_to_syftui("🌐 Access the UI at your app's assigned port")
     
     try:

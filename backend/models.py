@@ -2,7 +2,7 @@
 Response models for the Syft Reviewer Allowlist API
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from pydantic import BaseModel
 
 
@@ -31,7 +31,7 @@ class JobHistoryItem(BaseModel):
     created_at: Optional[str] = None
     stored_at: Optional[str] = None
     is_trusted_code: bool = False
-    code_files: Optional[Dict[str, Any]] = None
+    code_files: Optional[Union[Dict[str, Any], List[str]]] = None
 
 
 class JobHistoryResponse(BaseModel):
@@ -72,4 +72,9 @@ class JobSignatureResponse(BaseModel):
     description: Optional[str] = None
     tags: List[str]
     is_trusted: bool = False
-    matches_trusted_job: Optional[TrustedCodeItem] = None 
+    matches_trusted_job: Optional[TrustedCodeItem] = None
+
+
+class JobActionRequest(BaseModel):
+    """Request model for job approval/rejection actions."""
+    reason: Optional[str] = None 
