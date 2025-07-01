@@ -303,16 +303,22 @@
                             <div class="flex items-center">
                                 <span id="currentFileName" class="text-gray-400">No file selected</span>
                             </div>
-                            <div id="jobActions" class="flex items-center space-x-2 hidden">
-                                <span id="trustedStatus" class="trusted-badge untrusted">untrusted</span>
-                                <button id="markTrustedBtn" onclick="markJobAsTrusted()" 
-                                        class="text-xs bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700">
-                                    ✨ Mark Trusted
+                            <div class="flex items-center space-x-2">
+                                <button onclick="refreshJobContent()" 
+                                        class="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">
+                                    🔄 Refresh Content
                                 </button>
-                                <button id="unmarkTrustedBtn" onclick="unmarkJobTrusted()" 
-                                        class="text-xs bg-gray-600 text-white px-3 py-1 rounded hover:bg-gray-700 hidden">
-                                    ❌ Remove Trust
-                                </button>
+                                <div id="jobActions" class="flex items-center space-x-2 hidden">
+                                    <span id="trustedStatus" class="trusted-badge untrusted">untrusted</span>
+                                    <button id="markTrustedBtn" onclick="markJobAsTrusted()" 
+                                            class="text-xs bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700">
+                                        ✨ Mark Trusted
+                                    </button>
+                                    <button id="unmarkTrustedBtn" onclick="unmarkJobTrusted()" 
+                                            class="text-xs bg-gray-600 text-white px-3 py-1 rounded hover:bg-gray-700 hidden">
+                                        ❌ Remove Trust
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         
@@ -547,20 +553,42 @@
             renderJobTree();
         }
 
-        function selectFile(fileName, jobIndex) {
+        async function selectFile(fileName, jobIndex) {
             const job = jobsData[jobIndex];
             currentSelectedJob = job;
             currentSelectedFile = fileName;
             
             renderJobTree();
-            displayFileContent(fileName, job.code_files[fileName]);
+            
+            // Try to fetch the file content via API to get the most up-to-date version
+            try {
+                const response = await fetch(`/api/v1/jobs/history/${job.signature}/files/${encodeURIComponent(fileName)}`);
+                if (response.ok) {
+                    const fileData = await response.json();
+                    displayFileContent(fileName, fileData.content, fileData.is_dummy || false);
+                } else {
+                    // Fallback to stored content
+                    displayFileContent(fileName, job.code_files[fileName]);
+                }
+            } catch (error) {
+                console.warn('Failed to fetch file content via API, using stored content:', error);
+                displayFileContent(fileName, job.code_files[fileName]);
+            }
+            
             updateJobActions(job);
         }
 
-        function displayFileContent(fileName, content) {
+        function displayFileContent(fileName, content, isDummy = false) {
             document.getElementById('emptyCodeState').style.display = 'none';
             document.getElementById('codeViewer').classList.remove('hidden');
-            document.getElementById('currentFileName').textContent = fileName;
+            
+            // Update file name with dummy indicator
+            const fileNameElement = document.getElementById('currentFileName');
+            if (isDummy) {
+                fileNameElement.innerHTML = `${fileName} <span style="color: #f59e0b; font-size: 11px; font-weight: bold;">[DEMO CONTENT]</span>`;
+            } else {
+                fileNameElement.textContent = fileName;
+            }
             
             const codeElement = document.getElementById('codeContent');
             codeElement.textContent = content;
@@ -636,6 +664,40 @@
                 console.error('Error removing trusted status:', error);
                 alert('Error removing trusted status');
             }
+        }
+
+        async function refreshJobContent() {
+            try {
+                showNotification('Refreshing job content...', 'info');
+                const response = await fetch('/api/v1/jobs/history/refresh-content', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    showNotification(result.message, 'success');
+                    await loadJobsForReview(); // Reload to show refreshed content
+                    
+                    // If we have a file selected, re-select it to show updated content
+                    if (currentSelectedFile && currentSelectedJob) {
+                        const jobIndex = jobsData.findIndex(job => job.signature === currentSelectedJob.signature);
+                        if (jobIndex >= 0) {
+                            await selectFile(currentSelectedFile, jobIndex);
+                        }
+                    }
+                } else {
+                    const error = await response.text();
+                    alert(`Failed to refresh content: ${error}`);
+                }
+            } catch (error) {
+                alert('Error refreshing content');
+                console.error('Refresh error:', error);
+            }
+        }
+
+        function showNotification(message, type = 'info') {
+            // Simple notification - you could enhance this with a proper notification system
+            console.log(`[${type.toUpperCase()}] ${message}`);
         }
 
         function refreshCodeReviewData() {

@@ -72,6 +72,55 @@ def _get_file_type(file_path: str) -> str:
         return 'text'
 
 
+def _is_dummy_content(content: str) -> bool:
+    """Check if content appears to be dummy/placeholder content."""
+    dummy_indicators = [
+        "Privacy-safe Customer Behavior Analysis",
+        "using differential privacy techniques to ensure individual privacy protection",
+        "This script performs privacy-preserving analysis",
+        "# Privacy-safe customer behavior analysis script"
+    ]
+    return any(indicator in content for indicator in dummy_indicators)
+
+
+def _try_reload_real_file_content(job_data: dict, file_path: str) -> Optional[str]:
+    """Try to reload real file content using syft-code-queue if available."""
+    try:
+        if not q:
+            return None
+        
+        # Try to find the job by UID
+        job_uid = job_data.get("uid")
+        if not job_uid:
+            return None
+        
+        # Try to get the job from syft-code-queue
+        job = q.get_job(job_uid)
+        if not job:
+            return None
+        
+        # Try to read the file content
+        content = job.read_file(file_path)
+        if content and not _is_dummy_content(content):
+            return content
+        
+        # Also try the code structure approach
+        if hasattr(job, 'get_code_structure'):
+            structure = job.get_code_structure()
+            if structure and 'files' in structure:
+                file_info = structure['files'].get(file_path)
+                if file_info and isinstance(file_info, dict):
+                    structure_content = file_info.get('content')
+                    if structure_content and not _is_dummy_content(structure_content):
+                        return structure_content
+        
+        return None
+    
+    except Exception as e:
+        logger.warning(f"Error trying to reload real content: {e}")
+        return None
+
+
 # Initialize SyftBox connection
 def get_client() -> Client:
     """Get SyftBox client."""
@@ -571,11 +620,23 @@ async def get_job_file_content_from_history(signature: str, file_path: str, clie
         if content is None:
             raise HTTPException(status_code=404, detail="File not found in job history")
         
+        # Check if this is dummy content and try to reload real content
+        if _is_dummy_content(str(content)):
+            logger.info(f"Detected dummy content for {file_path}, attempting to reload real content")
+            try:
+                real_content = _try_reload_real_file_content(target_job, file_path)
+                if real_content:
+                    content = real_content
+                    logger.info(f"Successfully reloaded real content for {file_path}")
+            except Exception as e:
+                logger.warning(f"Could not reload real content for {file_path}: {e}")
+        
         return {
             "content": str(content),
             "file_path": file_path,
             "file_type": _get_file_type(file_path),
-            "size": len(str(content))
+            "size": len(str(content)),
+            "is_dummy": _is_dummy_content(str(content))
         }
     
     except HTTPException:

@@ -156,20 +156,43 @@ class ReviewerAllowlistApp:
             
             if not code_files_found:
                 try:
-                    # Method 2: Try list_files and read_file
+                    # Method 2: Try get_code_structure (most comprehensive approach)
+                    if hasattr(job, 'get_code_structure'):
+                        structure = job.get_code_structure()
+                        if structure and 'files' in structure:
+                            files_data = structure['files']
+                            if files_data:
+                                log_to_syftui(f"📁 Found code structure with {len(files_data)} files", "DEBUG")
+                                for file_path, file_info in files_data.items():
+                                    if isinstance(file_info, dict) and 'content' in file_info:
+                                        content = file_info['content']
+                                        if content and not content.startswith('<'):  # Skip binary/error files
+                                            job_data['code_files'][file_path] = content
+                                            code_files_found = True
+                                            log_to_syftui(f"✅ Loaded file {file_path} from structure ({len(content)} chars)", "DEBUG")
+                except Exception as e:
+                    log_to_syftui(f"❌ Method 2a (get_code_structure) failed: {e}", "DEBUG")
+            
+            if not code_files_found:
+                try:
+                    # Method 2b: Try list_files and read_file (fallback)
                     if hasattr(job, 'list_files') and hasattr(job, 'read_file'):
                         files = job.list_files()
                         if files:
+                            log_to_syftui(f"📁 Found {len(files)} files via list_files(): {files}", "DEBUG")
                             for filename in files:
                                 try:
                                     content = job.read_file(filename)
                                     if content:
                                         job_data['code_files'][filename] = content
                                         code_files_found = True
-                                except Exception:
-                                    pass
-                except Exception:
-                    pass
+                                        log_to_syftui(f"✅ Successfully read file {filename} ({len(content)} chars)", "DEBUG")
+                                    else:
+                                        log_to_syftui(f"⚠️ Empty content for file {filename}", "DEBUG")
+                                except Exception as e:
+                                    log_to_syftui(f"❌ Error reading file {filename}: {e}", "DEBUG")
+                except Exception as e:
+                    log_to_syftui(f"❌ Method 2b (list_files/read_file) failed: {e}", "DEBUG")
             
             if not code_files_found:
                 try:
@@ -216,6 +239,15 @@ class ReviewerAllowlistApp:
                     if isinstance(code_files_attr, list):
                         # Store as list for now (filenames only - will be converted to demo content during storage)
                         job_data['code_files'] = code_files_attr
+                        log_to_syftui(f"⚠️ Using fallback: storing filenames only {code_files_attr} - will create dummy content", "WARN")
+            
+            # Summary log
+            if code_files_found and isinstance(job_data.get('code_files'), dict):
+                file_count = len(job_data['code_files'])
+                total_content_size = sum(len(str(content)) for content in job_data['code_files'].values())
+                log_to_syftui(f"✅ Successfully extracted {file_count} files with real content ({total_content_size} total chars)")
+            elif isinstance(job_data.get('code_files'), list):
+                log_to_syftui(f"⚠️ Only extracted filenames, dummy content will be generated: {job_data['code_files']}")
             
             return job_data
             
