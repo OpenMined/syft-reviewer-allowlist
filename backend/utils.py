@@ -465,21 +465,14 @@ def is_job_trusted_code(client: Client, job_data: Dict[str, Any]) -> Optional[Di
 def get_allowlist(client: Client) -> List[str]:
     """
     Get the allowlist by reading all email files in the allowlist directory.
-    If directory doesn't exist, create it with default email.
     """
     allowlist_dir = get_allowlist_dir_path(client)
     allowlist_dir.mkdir(parents=True, exist_ok=True)
     
-    # Check if directory is empty, if so create default
-    email_files = list(allowlist_dir.glob("*"))
-    if not email_files:
-        # Create default allowlist with andrew@openmined.org
-        default_email = "andrew@openmined.org"
-        _create_email_file(allowlist_dir, default_email)
-        return [default_email]
-    
     # Read all email files and convert filenames back to emails
     allowlist = []
+    email_files = list(allowlist_dir.glob("*"))
+    
     for email_file in email_files:
         if email_file.is_file():
             try:
@@ -488,6 +481,7 @@ def get_allowlist(client: Client) -> List[str]:
             except Exception as e:
                 logger.warning(f"Could not parse email file {email_file.name}: {e}")
     
+    logger.info(f"📂 Loaded allowlist from file: {allowlist}")
     return sorted(allowlist)
 
 
@@ -521,12 +515,12 @@ def _remove_email_file(allowlist_dir: Path, email: str) -> None:
     try:
         if email_file.exists():
             email_file.unlink()
-            logger.info(f"Removed allowlist file for {email}")
+            logger.info(f"✅ Removed allowlist file for {email}")
         else:
-            logger.warning(f"Email file for {email} does not exist")
+            logger.warning(f"⚠️ Email file for {email} does not exist at path: {email_file}")
     except Exception as e:
-        logger.error(f"Error removing email file for {email}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to remove file for {email}")
+        logger.error(f"❌ Error removing email file for {email}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to remove file for {email}: {str(e)}")
 
 
 def save_allowlist(client: Client, emails: List[str]) -> None:
