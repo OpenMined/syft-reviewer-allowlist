@@ -640,13 +640,13 @@ def store_decision(client: Client, decision_data: Dict[str, Any]) -> str:
         raise
 
 
-def get_decision_history(client: Client, limit: int = 100) -> List[Dict[str, Any]]:
+def get_decision_history(client: Client, limit: int = None) -> List[Dict[str, Any]]:
     """
     Get the decision history, sorted by most recent first.
     
     Args:
         client: SyftBox client
-        limit: Maximum number of decisions to return
+        limit: Maximum number of decisions to return (None for unlimited)
     
     Returns:
         List of decision records
@@ -665,7 +665,10 @@ def get_decision_history(client: Client, limit: int = 100) -> List[Dict[str, Any
         reverse=True
     )
     
-    for decision_file in decision_files[:limit]:
+    # Apply limit if specified, otherwise process all files
+    files_to_process = decision_files[:limit] if limit is not None else decision_files
+    
+    for decision_file in files_to_process:
         try:
             with open(decision_file) as f:
                 decision_data = json.load(f)

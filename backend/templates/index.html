@@ -1102,7 +1102,7 @@
         // Decision History Functions
         async function loadDecisionHistory(silentUpdate = false) {
             try {
-                const response = await fetch('/api/v1/decisions/history?limit=100');
+                const response = await fetch('/api/v1/decisions/history?limit=999999');
                 
                 if (response.ok) {
                     const data = await response.json();

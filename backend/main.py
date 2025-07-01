@@ -825,7 +825,9 @@ async def get_decision_history_endpoint(
 ) -> Dict[str, Any]:
     """Get the decision history."""
     try:
-        decisions = get_decision_history(client, limit=limit)
+        # Treat very large limits as unlimited (None)
+        actual_limit = None if limit >= 999999 else limit
+        decisions = get_decision_history(client, limit=actual_limit)
         
         return {
             "decisions": decisions,
