@@ -8,14 +8,14 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-50 min-h-screen">
-    <div class="container mx-auto px-4 py-8 max-w-4xl">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
         <!-- Header -->
         <div class="mb-8">
             <h1 class="text-3xl font-bold text-gray-900 flex items-center">
                 <i class="fas fa-shield-alt mr-3 text-blue-600"></i>
                 Syft Reviewer Allowlist
             </h1>
-            <p class="text-gray-600 mt-2">Manage trusted senders for automatic job approval</p>
+            <p class="text-gray-600 mt-2">Manage trusted senders and trusted code patterns for automatic job approval</p>
         </div>
 
         <!-- Status Card -->
@@ -24,47 +24,107 @@
                 <i class="fas fa-cog mr-2"></i>
                 Application Status
             </h2>
-            <div class="grid grid-cols-2 gap-4 text-sm" id="statusContent">
+            <div class="grid grid-cols-3 gap-4 text-sm" id="statusContent">
                 <div class="text-gray-500">Loading status...</div>
             </div>
         </div>
 
-        <!-- Allowlist Management Card -->
-        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 class="text-xl font-semibold mb-4 flex items-center">
-                <i class="fas fa-users mr-2"></i>
-                Trusted Senders Allowlist
-            </h2>
-            <p class="text-gray-600 mb-4">Emails in this list will have their code jobs automatically approved</p>
-            
-            <!-- Add Email Section -->
-            <div class="flex space-x-2 mb-4">
-                <div class="flex-1">
-                    <label for="emailInput" class="block text-sm font-medium text-gray-700 mb-1">
-                        Add trusted email address
-                    </label>
-                    <input 
-                        type="email" 
-                        id="emailInput" 
-                        placeholder="trusted@example.com"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                </div>
-                <button 
-                    id="addButton"
-                    class="mt-6 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    <i class="fas fa-plus"></i>
-                </button>
+        <!-- Navigation Tabs -->
+        <div class="bg-white rounded-lg shadow-md mb-6">
+            <div class="border-b border-gray-200">
+                <nav class="flex space-x-8" aria-label="Tabs">
+                    <button onclick="showTab('emailAllowlist')" class="tab-button active" id="emailAllowlistTab">
+                        <i class="fas fa-users mr-2"></i>
+                        Email Allowlist
+                    </button>
+                    <button onclick="showTab('trustedCode')" class="tab-button" id="trustedCodeTab">
+                        <i class="fas fa-code mr-2"></i>
+                        Trusted Code
+                    </button>
+                </nav>
             </div>
 
-            <!-- Current Allowlist -->
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">
-                    Current allowlist (<span id="emailCount">0</span> emails):
-                </label>
-                <div id="emailList" class="flex flex-wrap gap-2">
-                    <div class="text-gray-500 text-sm">Loading allowlist...</div>
+            <!-- Email Allowlist Tab Content -->
+            <div id="emailAllowlistContent" class="tab-content active p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <i class="fas fa-users mr-2"></i>
+                    Trusted Senders Allowlist
+                </h2>
+                <p class="text-gray-600 mb-4">Emails in this list will have their code jobs automatically approved</p>
+                <div class="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+                    <p class="text-blue-800 text-sm">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        <strong>Privacy:</strong> Each email is stored in a separate file with individual permissions. 
+                        Users can only see their own presence in the allowlist.
+                    </p>
+                </div>
+                
+                <!-- Add Email Section -->
+                <div class="flex space-x-2 mb-4">
+                    <div class="flex-1">
+                        <label for="emailInput" class="block text-sm font-medium text-gray-700 mb-1">
+                            Add trusted email address
+                        </label>
+                        <input 
+                            type="email" 
+                            id="emailInput" 
+                            placeholder="trusted@example.com"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                    </div>
+                    <button 
+                        id="addEmailButton"
+                        class="mt-6 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <i class="fas fa-plus"></i>
+                    </button>
+                </div>
+
+                <!-- Current Allowlist -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Current allowlist (<span id="emailCount">0</span> emails):
+                    </label>
+                    <div id="emailList" class="flex flex-wrap gap-2">
+                        <div class="text-gray-500 text-sm">Loading allowlist...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trusted Code Tab Content -->
+            <div id="trustedCodeContent" class="tab-content hidden p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <i class="fas fa-code mr-2"></i>
+                    Trusted Code Patterns
+                </h2>
+                <p class="text-gray-600 mb-4">Jobs matching these exact code patterns will be auto-approved from any sender</p>
+                <div class="bg-green-50 border border-green-200 rounded-md p-3 mb-6">
+                    <p class="text-green-800 text-sm">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        <strong>How it works:</strong> When jobs complete successfully, they're stored in history. 
+                        You can mark any historical job as "trusted code" to auto-approve identical future submissions.
+                    </p>
+                </div>
+
+                <!-- Trusted Code List -->
+                <div class="mb-8">
+                    <h3 class="text-lg font-medium mb-3">
+                        Current Trusted Code (<span id="trustedCodeCount">0</span> patterns):
+                    </h3>
+                    <div id="trustedCodeList" class="space-y-3">
+                        <div class="text-gray-500 text-sm">Loading trusted code patterns...</div>
+                    </div>
+                </div>
+
+                <!-- Job History -->
+                <div>
+                    <h3 class="text-lg font-medium mb-3">
+                        Job History (<span id="historyCount">0</span> jobs):
+                    </h3>
+                    <p class="text-gray-600 text-sm mb-4">Select completed jobs to mark as trusted code patterns</p>
+                    <div id="jobHistoryList" class="space-y-3">
+                        <div class="text-gray-500 text-sm">Loading job history...</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -72,18 +132,64 @@
         <!-- Help Card -->
         <div class="bg-white rounded-lg shadow-md p-6">
             <h2 class="text-xl font-semibold mb-4">How it works</h2>
-            <div class="space-y-2 text-sm text-gray-600">
-                <p>• The auto-approval service checks for pending code jobs every second</p>
-                <p>• Jobs from emails in the allowlist are automatically approved</p>
-                <p>• Jobs from other senders remain pending for manual review</p>
-                <p>• Changes to the allowlist take effect within 30 seconds</p>
+            <div class="grid md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="font-semibold text-green-600 mb-2">Email Allowlist</h3>
+                    <div class="space-y-1 text-sm text-gray-600">
+                        <p>• Jobs from trusted email addresses are auto-approved instantly</p>
+                        <p>• Each email stored as individual file with restricted permissions</p>
+                        <p>• Users can only see their own presence in the allowlist</p>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-blue-600 mb-2">Trusted Code Patterns</h3>
+                    <div class="space-y-1 text-sm text-gray-600">
+                        <p>• Jobs matching exact code patterns are auto-approved from any sender</p>
+                        <p>• Based on complete job signature (name, description, tags, code files)</p>
+                        <p>• Mark successful historical jobs as trusted for future identical submissions</p>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-200">
+                <div class="space-y-1 text-sm text-gray-600">
+                    <p>• The auto-approval service checks for pending code jobs every second</p>
+                    <p>• Changes to settings take effect within 30 seconds</p>
+                    <p>• Detailed status logged every 60 seconds to reduce noise</p>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
         let allowlistEmails = [];
+        let trustedCodePatterns = [];
+        let jobHistory = [];
         let isLoading = false;
+        let currentTab = 'emailAllowlist';
+
+        // Tab management
+        function showTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(tabName + 'Tab').classList.add('active');
+
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+                content.classList.add('hidden');
+            });
+            document.getElementById(tabName + 'Content').classList.remove('hidden');
+            document.getElementById(tabName + 'Content').classList.add('active');
+
+            currentTab = tabName;
+
+            // Load data for the active tab
+            if (tabName === 'trustedCode') {
+                loadTrustedCodeData();
+            }
+        }
 
         // Load initial data
         async function loadData() {
@@ -100,6 +206,9 @@
                     <div><span class="font-medium">User:</span> ${status.syftbox.user_email}</div>
                     <div><span class="font-medium">Backend:</span> <span class="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">${status.components.backend}</span></div>
                     <div><span class="font-medium">Allowlist:</span> <span class="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">${status.components.allowlist}</span></div>
+                    <div><span class="font-medium">Storage:</span> <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">${status.components.storage || 'unknown'}</span></div>
+                    <div><span class="font-medium">Trusted Code:</span> <span class="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs">${status.components.trusted_code || 'unknown'}</span></div>
+                    <div class="col-span-3 text-xs text-gray-500 mt-2">Individual files with permissions + Trusted code pattern matching</div>
                 `;
             } catch (error) {
                 console.error('Failed to load status:', error);
@@ -116,6 +225,34 @@
             } catch (error) {
                 console.error('Failed to load allowlist:', error);
                 document.getElementById('emailList').innerHTML = '<div class="text-red-500 text-sm">Failed to load allowlist</div>';
+            }
+        }
+
+        async function loadTrustedCodeData() {
+            await Promise.all([loadTrustedCode(), loadJobHistory()]);
+        }
+
+        async function loadTrustedCode() {
+            try {
+                const response = await fetch('/api/v1/trusted-code');
+                const data = await response.json();
+                trustedCodePatterns = data.trusted_jobs;
+                updateTrustedCodeList();
+            } catch (error) {
+                console.error('Failed to load trusted code:', error);
+                document.getElementById('trustedCodeList').innerHTML = '<div class="text-red-500 text-sm">Failed to load trusted code</div>';
+            }
+        }
+
+        async function loadJobHistory() {
+            try {
+                const response = await fetch('/api/v1/trusted-code/history?limit=20');
+                const data = await response.json();
+                jobHistory = data.jobs;
+                updateJobHistoryList();
+            } catch (error) {
+                console.error('Failed to load job history:', error);
+                document.getElementById('jobHistoryList').innerHTML = '<div class="text-red-500 text-sm">Failed to load job history</div>';
             }
         }
 
@@ -139,6 +276,77 @@
             }
         }
 
+        function updateTrustedCodeList() {
+            const trustedCodeList = document.getElementById('trustedCodeList');
+            const trustedCodeCount = document.getElementById('trustedCodeCount');
+            
+            trustedCodeCount.textContent = trustedCodePatterns.length;
+
+            if (trustedCodePatterns.length === 0) {
+                trustedCodeList.innerHTML = '<p class="text-gray-500 text-sm">No trusted code patterns configured. Mark completed jobs from history below.</p>';
+            } else {
+                trustedCodeList.innerHTML = trustedCodePatterns.map(pattern => `
+                    <div class="border border-gray-200 rounded-lg p-4 bg-green-50">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <h4 class="font-medium text-gray-900">${pattern.name}</h4>
+                                <p class="text-sm text-gray-600 mt-1">${pattern.description || 'No description'}</p>
+                                <div class="flex items-center space-x-4 mt-2 text-xs text-gray-500">
+                                    <span>Original: ${pattern.original_requester_email}</span>
+                                    <span>Signature: ${pattern.signature.substring(0, 12)}...</span>
+                                    <span>Tags: ${pattern.tags.join(', ') || 'None'}</span>
+                                </div>
+                            </div>
+                            <button onclick="unmarkTrustedCode('${pattern.signature}')" 
+                                    class="ml-4 px-3 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">
+                                <i class="fas fa-times mr-1"></i>Remove
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        function updateJobHistoryList() {
+            const jobHistoryList = document.getElementById('jobHistoryList');
+            const historyCount = document.getElementById('historyCount');
+            
+            historyCount.textContent = jobHistory.length;
+
+            if (jobHistory.length === 0) {
+                jobHistoryList.innerHTML = '<p class="text-gray-500 text-sm">No job history available. Complete some jobs first to see them here.</p>';
+            } else {
+                jobHistoryList.innerHTML = jobHistory.map(job => {
+                    const isTrusted = job.is_trusted_code;
+                    const bgColor = isTrusted ? 'bg-green-50 border-green-200' : 'bg-white border-gray-200';
+                    const buttonClass = isTrusted ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700';
+                    const buttonText = isTrusted ? 'Trusted' : 'Mark as Trusted';
+                    const buttonIcon = isTrusted ? 'fa-check' : 'fa-star';
+                    
+                    return `
+                        <div class="border ${bgColor} rounded-lg p-4">
+                            <div class="flex justify-between items-start">
+                                <div class="flex-1">
+                                    <h4 class="font-medium text-gray-900">${job.name}</h4>
+                                    <p class="text-sm text-gray-600 mt-1">${job.description || 'No description'}</p>
+                                    <div class="flex items-center space-x-4 mt-2 text-xs text-gray-500">
+                                        <span>From: ${job.requester_email}</span>
+                                        <span>Signature: ${job.signature.substring(0, 12)}...</span>
+                                        <span>Tags: ${job.tags.join(', ') || 'None'}</span>
+                                    </div>
+                                </div>
+                                <button onclick="${isTrusted ? `unmarkTrustedCode('${job.signature}')` : `markTrustedCode('${job.signature}')`}" 
+                                        class="ml-4 px-3 py-1 ${buttonClass} rounded text-sm hover:opacity-80">
+                                    <i class="fas ${buttonIcon} mr-1"></i>${buttonText}
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+
+        // Email allowlist functions
         async function addEmail() {
             const emailInput = document.getElementById('emailInput');
             const email = emailInput.value.trim();
@@ -191,20 +399,67 @@
             }
         }
 
+        // Trusted code functions
+        async function markTrustedCode(signature) {
+            if (isLoading) return;
+            
+            setLoading(true);
+            try {
+                const response = await fetch(`/api/v1/trusted-code/mark/${signature}`, {
+                    method: 'POST',
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to mark as trusted code');
+                }
+
+                // Refresh trusted code data
+                await loadTrustedCodeData();
+            } catch (error) {
+                console.error('Failed to mark as trusted code:', error);
+                alert('Failed to mark as trusted code. Please try again.');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function unmarkTrustedCode(signature) {
+            if (isLoading) return;
+            
+            setLoading(true);
+            try {
+                const response = await fetch(`/api/v1/trusted-code/unmark/${signature}`, {
+                    method: 'DELETE',
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to remove from trusted code');
+                }
+
+                // Refresh trusted code data
+                await loadTrustedCodeData();
+            } catch (error) {
+                console.error('Failed to remove from trusted code:', error);
+                alert('Failed to remove from trusted code. Please try again.');
+            } finally {
+                setLoading(false);
+            }
+        }
+
         function setLoading(loading) {
             isLoading = loading;
-            const addButton = document.getElementById('addButton');
+            const addEmailButton = document.getElementById('addEmailButton');
             if (loading) {
-                addButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-                addButton.disabled = true;
+                addEmailButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                addEmailButton.disabled = true;
             } else {
-                addButton.innerHTML = '<i class="fas fa-plus"></i>';
-                addButton.disabled = false;
+                addEmailButton.innerHTML = '<i class="fas fa-plus"></i>';
+                addEmailButton.disabled = false;
             }
         }
 
         // Event listeners
-        document.getElementById('addButton').addEventListener('click', addEmail);
+        document.getElementById('addEmailButton').addEventListener('click', addEmail);
         document.getElementById('emailInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') addEmail();
         });
@@ -212,5 +467,23 @@
         // Load data on page load
         loadData();
     </script>
+
+    <style>
+        .tab-button {
+            @apply whitespace-nowrap py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-500 hover:text-gray-700 hover:border-gray-300;
+        }
+        .tab-button.active {
+            @apply border-blue-500 text-blue-600;
+        }
+        .tab-content {
+            @apply transition-all duration-200;
+        }
+        .tab-content.hidden {
+            @apply opacity-0;
+        }
+        .tab-content.active {
+            @apply opacity-100;
+        }
+    </style>
 </body>
 </html> 

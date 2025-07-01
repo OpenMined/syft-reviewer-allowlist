@@ -3,7 +3,7 @@
 Syft Reviewer Allowlist App - SyftBox Integration
 
 This module runs as a SyftBox app, continuously polling for pending jobs
-and auto-approving those from trusted senders in the allowlist.
+and auto-approving those from trusted senders in the allowlist or matching trusted code patterns.
 """
 
 import time
@@ -11,7 +11,7 @@ import signal
 import sys
 from datetime import datetime
 from time import sleep
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from loguru import logger
 
@@ -45,21 +45,23 @@ except ImportError:
     logger.error("syft-code-queue not available - this is required for the app to function")
     sys.exit(1)
 
-# Import our backend utils for allowlist management
+# Import our backend utils for allowlist and trusted code management
 try:
     import sys
     import os
     # Add the backend directory to the Python path
     backend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "backend")
     sys.path.insert(0, backend_path)
-    from utils import get_allowlist
+    from utils import get_allowlist, is_job_trusted_code, store_job_in_history
 except ImportError:
-    log_to_syftui("⚠️ Backend utils not available - using default allowlist", "WARN")
+    log_to_syftui("⚠️ Backend utils not available - using basic functionality", "WARN")
     get_allowlist = None
+    is_job_trusted_code = None
+    store_job_in_history = None
 
 
 class ReviewerAllowlistApp:
-    """App that automatically approves jobs from trusted senders."""
+    """App that automatically approves jobs from trusted senders and trusted code patterns."""
     
     def __init__(self, poll_interval: int = 1):
         """
@@ -75,6 +77,7 @@ class ReviewerAllowlistApp:
             
             log_to_syftui(f"✅ Initialized Reviewer Allowlist App for {self.email}")
             log_to_syftui(f"📝 Trusted senders: {', '.join(self.allowlist)}")
+            log_to_syftui(f"🔒 Trusted code patterns: enabled")
             log_to_syftui(f"⏰ Polling every {poll_interval} second(s)")
             
         except Exception as e:
@@ -114,12 +117,76 @@ class ReviewerAllowlistApp:
         except Exception as e:
             log_to_syftui(f"❌ Error refreshing allowlist: {e}", "ERROR")
     
+    def _extract_job_data(self, job) -> Dict[str, Any]:
+        """
+        Extract job data for trusted code comparison.
+        
+        Args:
+            job: CodeJob object from syft-code-queue
+            
+        Returns:
+            Dictionary containing job data for signature calculation
+        """
+        try:
+            # Get basic job information
+            job_data = {
+                "name": getattr(job, 'name', ''),
+                "description": getattr(job, 'description', ''),
+                "tags": getattr(job, 'tags', []),
+                "requester_email": getattr(job, 'requester_email', ''),
+                "code_files": {}
+            }
+            
+            # Try to get code files if available
+            try:
+                if hasattr(job, 'get_review_data'):
+                    review_data = job.get_review_data()
+                    if review_data and 'code_files' in review_data:
+                        job_data['code_files'] = review_data['code_files']
+                elif hasattr(job, 'code_folder') and job.code_folder:
+                    # Try to read code files directly
+                    from pathlib import Path
+                    code_folder = Path(job.code_folder)
+                    if code_folder.exists():
+                        for code_file in code_folder.rglob('*'):
+                            if code_file.is_file():
+                                try:
+                                    relative_path = str(code_file.relative_to(code_folder))
+                                    job_data['code_files'][relative_path] = code_file.read_text(encoding='utf-8', errors='ignore')
+                                except Exception:
+                                    # Skip files that can't be read
+                                    pass
+            except Exception as e:
+                log_to_syftui(f"⚠️ Could not extract code files for job '{job_data['name']}': {e}", "WARN")
+            
+            return job_data
+            
+        except Exception as e:
+            log_to_syftui(f"❌ Error extracting job data: {e}", "ERROR")
+            return {
+                "name": str(job),
+                "description": "",
+                "tags": [],
+                "requester_email": getattr(job, 'requester_email', ''),
+                "code_files": {}
+            }
+    
+    def _store_completed_job_in_history(self, job):
+        """Store a completed job in history for potential trusted code marking."""
+        try:
+            if store_job_in_history is not None:
+                job_data = self._extract_job_data(job)
+                signature = store_job_in_history(self.syftbox_client, job_data)
+                log_to_syftui(f"📚 Stored job in history: {job_data['name']} -> {signature[:12]}...")
+        except Exception as e:
+            log_to_syftui(f"⚠️ Could not store job in history: {e}", "WARN")
+    
     def run(self):
         """
         Start continuous job polling and auto-approval.
         """
         log_to_syftui(f"🔄 Starting continuous job polling...")
-        log_to_syftui(f"⏰ Checking every {self.poll_interval} second(s) for jobs from trusted senders")
+        log_to_syftui(f"⏰ Checking every {self.poll_interval} second(s) for jobs from trusted senders and trusted code")
         
         # Set up graceful shutdown
         def signal_handler(signum, frame):
@@ -151,18 +218,19 @@ class ReviewerAllowlistApp:
         """Process one polling cycle."""
         
         # Log cycle number periodically (every 60 cycles = 1 minute at 1s intervals)
-        if cycle % 60 == 0:
+        verbose_logging = cycle % 60 == 0
+        if verbose_logging:
             log_to_syftui(f"⏰ Polling cycle {cycle} - checking for pending jobs...")
         
         # Refresh allowlist every 30 seconds (30 cycles at 1s intervals)
         if cycle % 30 == 0:
             self._refresh_allowlist()
         
-        # Check for pending jobs and auto-approve from allowlist
-        self._auto_approve_from_allowlist()
+        # Check for pending jobs and auto-approve from allowlist or trusted code
+        self._auto_approve_jobs(verbose_logging=verbose_logging)
     
-    def _auto_approve_from_allowlist(self):
-        """Auto-approve jobs from senders in the allowlist."""
+    def _auto_approve_jobs(self, verbose_logging: bool = False):
+        """Auto-approve jobs from allowlist senders or matching trusted code patterns."""
         try:
             # Get all jobs pending for me
             pending_jobs = q.pending_for_me
@@ -171,43 +239,75 @@ class ReviewerAllowlistApp:
                 # Don't log when no jobs - too verbose for continuous polling
                 return
             
-            log_to_syftui(f"📋 Found {len(pending_jobs)} job(s) pending approval")
+            # Only log detailed status every 60 seconds
+            if verbose_logging:
+                log_to_syftui(f"📋 Found {len(pending_jobs)} job(s) pending approval")
             
-            # Filter jobs from allowlisted senders
-            trusted_jobs = []
+            # Separate jobs by approval reason
+            email_approved_jobs = []
+            trusted_code_jobs = []
+            untrusted_jobs = []
+            
             for job in pending_jobs:
+                job_approved = False
+                approval_reason = ""
+                
+                # Check email allowlist first
                 if job.requester_email in self.allowlist:
-                    trusted_jobs.append(job)
-                    log_to_syftui(f"✅ Job '{job.name}' from {job.requester_email} - TRUSTED")
-                else:
-                    log_to_syftui(f"⚠️  Job '{job.name}' from {job.requester_email} - NOT IN ALLOWLIST")
+                    email_approved_jobs.append(job)
+                    approval_reason = f"trusted sender ({job.requester_email})"
+                    job_approved = True
+                    if verbose_logging:
+                        log_to_syftui(f"✅ Job '{job.name}' from {job.requester_email} - TRUSTED SENDER")
+                
+                # If not from trusted sender, check trusted code patterns
+                elif is_job_trusted_code is not None:
+                    try:
+                        job_data = self._extract_job_data(job)
+                        trusted_match = is_job_trusted_code(self.syftbox_client, job_data)
+                        if trusted_match:
+                            trusted_code_jobs.append((job, trusted_match))
+                            approval_reason = f"trusted code pattern (signature: {trusted_match.get('signature', 'unknown')[:12]}...)"
+                            job_approved = True
+                            if verbose_logging:
+                                log_to_syftui(f"🔒 Job '{job.name}' from {job.requester_email} - TRUSTED CODE PATTERN")
+                    except Exception as e:
+                        log_to_syftui(f"⚠️ Error checking trusted code for job '{job.name}': {e}", "WARN")
+                
+                if not job_approved:
+                    untrusted_jobs.append(job)
+                    if verbose_logging:
+                        log_to_syftui(f"⚠️  Job '{job.name}' from {job.requester_email} - NOT IN ALLOWLIST OR TRUSTED CODE")
             
-            if not trusted_jobs:
-                if len(pending_jobs) > 0:
-                    log_to_syftui("🚫 No jobs from trusted senders found")
+            # Log summary if no approvals but jobs exist
+            if not email_approved_jobs and not trusted_code_jobs:
+                if verbose_logging and len(pending_jobs) > 0:
+                    log_to_syftui("🚫 No jobs from trusted senders or matching trusted code found")
                 return
             
-            log_to_syftui(f"🚀 Auto-approving {len(trusted_jobs)} job(s) from trusted senders...")
+            total_approved = len(email_approved_jobs) + len(trusted_code_jobs)
+            log_to_syftui(f"🚀 Auto-approving {total_approved} job(s)...")
             
-            # Auto-approve trusted jobs
+            # Auto-approve jobs from trusted senders
             approved_count = 0
             failed_count = 0
             
-            for job in trusted_jobs:
-                try:
-                    reason = f"Auto-approved from trusted sender ({job.requester_email}) at {datetime.now().isoformat()}"
-                    success = job.approve(reason)
-                    
-                    if success:
-                        approved_count += 1
-                        log_to_syftui(f"✅ Approved: '{job.name}' from {job.requester_email}")
-                    else:
-                        failed_count += 1
-                        log_to_syftui(f"❌ Failed to approve: '{job.name}' from {job.requester_email}", "ERROR")
-                        
-                except Exception as e:
+            # Process email-approved jobs
+            for job in email_approved_jobs:
+                success = self._approve_job(job, f"trusted sender ({job.requester_email})")
+                if success:
+                    approved_count += 1
+                else:
                     failed_count += 1
-                    log_to_syftui(f"❌ Error approving '{job.name}': {e}", "ERROR")
+            
+            # Process trusted-code-approved jobs
+            for job, trusted_match in trusted_code_jobs:
+                signature = trusted_match.get('signature', 'unknown')[:12]
+                success = self._approve_job(job, f"trusted code pattern ({signature}...)")
+                if success:
+                    approved_count += 1
+                else:
+                    failed_count += 1
             
             # Log summary
             if approved_count > 0 or failed_count > 0:
@@ -215,6 +315,37 @@ class ReviewerAllowlistApp:
             
         except Exception as e:
             log_to_syftui(f"❌ Error during auto-approval check: {e}", "ERROR")
+    
+    def _approve_job(self, job, reason: str) -> bool:
+        """
+        Approve a single job with the given reason.
+        
+        Args:
+            job: CodeJob to approve
+            reason: Reason for approval
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            approval_reason = f"Auto-approved ({reason}) at {datetime.now().isoformat()}"
+            success = job.approve(approval_reason)
+            
+            if success:
+                log_to_syftui(f"✅ Approved: '{job.name}' from {job.requester_email} ({reason})")
+                
+                # Store completed jobs in history for potential trusted code marking
+                if job.status.value == 'completed':
+                    self._store_completed_job_in_history(job)
+                    
+                return True
+            else:
+                log_to_syftui(f"❌ Failed to approve: '{job.name}' from {job.requester_email}", "ERROR")
+                return False
+                
+        except Exception as e:
+            log_to_syftui(f"❌ Error approving '{job.name}': {e}", "ERROR")
+            return False
 
 
 def main():
@@ -222,7 +353,8 @@ def main():
     
     log_to_syftui("🤖 Syft Reviewer Allowlist - Auto-approval Service")
     log_to_syftui("=" * 60)
-    log_to_syftui("📝 Allowlist is now managed via the web UI")
+    log_to_syftui("📝 Email allowlist managed via web UI")
+    log_to_syftui("🔒 Trusted code patterns managed via web UI")
     log_to_syftui("🌐 Access the UI at your app's assigned port")
     
     try:
