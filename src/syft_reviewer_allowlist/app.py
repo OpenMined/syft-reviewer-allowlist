@@ -76,6 +76,9 @@ class ReviewerAllowlistApp:
             self.poll_interval = poll_interval
             self.allowlist = self._load_allowlist()
             self.processed_job_ids: Set[str] = set()  # Track jobs we've already stored in history
+            self.ignored_job_ids: Set[str] = set()  # Track jobs we've already ignored (to prevent spam)
+            self.last_allowlist_update = datetime.now()  # Track when allowlist was last updated
+            self.last_trusted_code_update = datetime.now()  # Track when trusted code was last updated
             
             log_to_syftui(f"✅ Initialized Reviewer Allowlist App for {self.email}")
             log_to_syftui(f"📝 Trusted senders: {', '.join(self.allowlist)}")
@@ -89,6 +92,9 @@ class ReviewerAllowlistApp:
             self.poll_interval = poll_interval
             self.allowlist = ["andrew@openmined.org"]  # Fallback default
             self.processed_job_ids: Set[str] = set()
+            self.ignored_job_ids: Set[str] = set()
+            self.last_allowlist_update = datetime.now()
+            self.last_trusted_code_update = datetime.now()
     
     @property
     def email(self) -> str:
@@ -116,7 +122,11 @@ class ReviewerAllowlistApp:
             if new_allowlist != self.allowlist:
                 old_list = self.allowlist.copy()
                 self.allowlist = new_allowlist
+                self.last_allowlist_update = datetime.now()
+                # Clear ignored jobs when allowlist changes - they should be re-evaluated
+                self.ignored_job_ids.clear()
                 log_to_syftui(f"🔄 Allowlist updated: {old_list} → {new_allowlist}")
+                log_to_syftui(f"🔄 Cleared ignored jobs cache - will re-evaluate pending jobs")
         except Exception as e:
             log_to_syftui(f"❌ Error refreshing allowlist: {e}", "ERROR")
     
@@ -306,6 +316,28 @@ class ReviewerAllowlistApp:
         except Exception as e:
             log_to_syftui(f"⚠️ Error checking completed jobs: {e}", "WARN")
     
+    def _cleanup_ignored_jobs_cache(self):
+        """Clean up ignored jobs cache by removing jobs that are no longer pending."""
+        try:
+            # Get current pending job UIDs
+            pending_jobs = q.pending_for_me or []
+            current_pending_uids = set()
+            
+            for job in pending_jobs:
+                job_uid = str(getattr(job, 'uid', f"{job.name}_{job.requester_email}"))
+                current_pending_uids.add(job_uid)
+            
+            # Remove ignored jobs that are no longer pending
+            old_ignored_count = len(self.ignored_job_ids)
+            self.ignored_job_ids = self.ignored_job_ids.intersection(current_pending_uids)
+            
+            cleaned_count = old_ignored_count - len(self.ignored_job_ids)
+            if cleaned_count > 0:
+                log_to_syftui(f"🧹 Cleaned up {cleaned_count} expired ignored jobs from cache")
+        
+        except Exception as e:
+            log_to_syftui(f"❌ Error cleaning up ignored jobs cache: {e}", "ERROR")
+    
     def run(self):
         """
         Start continuous job polling and auto-approval.
@@ -355,6 +387,10 @@ class ReviewerAllowlistApp:
         # Check for completed jobs every 10 seconds (10 cycles at 1s intervals)
         if cycle % 10 == 0:
             self._check_and_store_completed_jobs()
+        
+        # Clean up ignored jobs cache every 5 minutes (300 cycles at 1s intervals)
+        if cycle % 300 == 0:
+            self._cleanup_ignored_jobs_cache()
         
         # Check for pending jobs and auto-approve from allowlist or trusted code
         self._auto_approve_jobs(verbose_logging=verbose_logging)
@@ -406,11 +442,15 @@ class ReviewerAllowlistApp:
                 
                 if not job_approved:
                     untrusted_jobs.append(job)
+                    
+                    # Create a unique job identifier for ignore tracking
+                    job_uid = str(getattr(job, 'uid', f"{job.name}_{job.requester_email}"))
+                    
                     if verbose_logging:
                         log_to_syftui(f"⚠️  Job '{job.name}' from {job.requester_email} - NOT IN ALLOWLIST OR TRUSTED CODE")
                     
-                    # Log the ignore decision
-                    if log_job_decision is not None:
+                    # Only log the ignore decision ONCE per job (avoid spam)
+                    if job_uid not in self.ignored_job_ids and log_job_decision is not None:
                         try:
                             job_data = self._extract_job_data(job)
                             log_job_decision(
@@ -420,6 +460,9 @@ class ReviewerAllowlistApp:
                                 f"Not in allowlist and no trusted code pattern match - sender: {job.requester_email}",
                                 {"auto_processed": True, "ignored_reason": "not_trusted"}
                             )
+                            # Mark this job as ignored to prevent repeated logging
+                            self.ignored_job_ids.add(job_uid)
+                            log_to_syftui(f"📝 Logged ignore decision for job '{job.name}' (UID: {job_uid})")
                         except Exception as e:
                             log_to_syftui(f"⚠️ Failed to log ignore decision for '{job.name}': {e}", "WARN")
             
