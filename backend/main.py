@@ -347,6 +347,91 @@ async def remove_email_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to remove {email} from allowlist")
 
 
+@app.get(
+    "/api/v1/allowlist/senders",
+    tags=["allowlist", "admin"],
+    summary="Get all senders who have submitted jobs",
+    description="Get list of all email addresses that have submitted jobs, along with their allowlist status"
+)
+async def get_all_senders_endpoint(
+    client: Client = Depends(get_client),
+) -> Dict[str, Any]:
+    """Get all senders and their allowlist status."""
+    try:
+        # Get decision history to find all senders
+        decisions = get_decision_history(client, limit=1000)
+        
+        # Get job history to find additional senders
+        job_history = get_job_history(client, limit=1000)
+        
+        # Collect all unique email addresses
+        all_emails = set()
+        
+        # From decision history
+        for decision in decisions:
+            if decision.get("requester_email"):
+                all_emails.add(decision["requester_email"])
+        
+        # From job history
+        for job in job_history:
+            if job.get("requester_email"):
+                all_emails.add(job["requester_email"])
+        
+        # Also try to get from syft-code-queue if available
+        if q:
+            try:
+                # Get all jobs from syft-code-queue
+                all_jobs = []
+                try:
+                    all_jobs.extend(q.jobs_for_me or [])
+                except:
+                    pass
+                try:
+                    all_jobs.extend(q.jobs_for_others or [])
+                except:
+                    pass
+                
+                for job in all_jobs:
+                    if hasattr(job, 'requester_email') and job.requester_email:
+                        all_emails.add(job.requester_email)
+            except Exception as e:
+                logger.warning(f"Could not get jobs from syft-code-queue: {e}")
+        
+        # Get current allowlist
+        allowlist = get_allowlist(client)
+        allowlist_set = set(allowlist)
+        
+        # Create sender info
+        senders = []
+        for email in sorted(all_emails):
+            # Count recent activity (last 100 decisions)
+            recent_decisions = [d for d in decisions[:100] if d.get("requester_email") == email]
+            
+            sender_info = {
+                "email": email,
+                "is_trusted": email in allowlist_set,
+                "recent_activity": len(recent_decisions),
+                "last_seen": recent_decisions[0]["timestamp"] if recent_decisions else None,
+                "actions": {
+                    "approved": len([d for d in recent_decisions if d.get("action") == "approve"]),
+                    "ignored": len([d for d in recent_decisions if d.get("action") == "ignore"]),
+                    "failed": len([d for d in recent_decisions if d.get("action") == "failed_approval"])
+                }
+            }
+            senders.append(sender_info)
+        
+        return {
+            "senders": senders,
+            "total_count": len(senders),
+            "trusted_count": len(allowlist),
+            "untrusted_count": len(senders) - len([s for s in senders if s["is_trusted"]])
+        }
+    
+    except Exception as e:
+        logger.error(f"Error getting senders: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get senders: {str(e)}")
+
+
 # === TRUSTED CODE ENDPOINTS ===
 
 @app.get(

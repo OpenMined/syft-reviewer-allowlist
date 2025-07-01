@@ -317,6 +317,82 @@
                 background-color: #10b981;
             }
         }
+
+        /* Sender card animations */
+        .sender-card.new-sender {
+            animation: senderUnicornRainbow 4s ease-in-out;
+        }
+
+        @keyframes senderUnicornRainbow {
+            0% {
+                background: linear-gradient(135deg, 
+                    #ff9a9e 0%, #fecfef 25%, #fecfef 50%, #ffc3a0 75%, #ff9a9e 100%);
+                background-size: 300% 300%;
+                background-position: 0% 50%;
+                border: 3px solid #ff6b6b;
+                transform: scale(1.05);
+                box-shadow: 0 8px 32px rgba(255, 107, 107, 0.4);
+            }
+            25% {
+                background-position: 100% 50%;
+                border-color: #4ecdc4;
+                box-shadow: 0 8px 32px rgba(78, 205, 196, 0.4);
+            }
+            50% {
+                background-position: 50% 100%;
+                border-color: #45b7d1;
+                box-shadow: 0 8px 32px rgba(69, 183, 209, 0.4);
+            }
+            75% {
+                background-position: 50% 0%;
+                border-color: #96ceb4;
+                box-shadow: 0 8px 32px rgba(150, 206, 180, 0.4);
+            }
+            100% {
+                background: white;
+                border: 1px solid #e5e7eb;
+                transform: scale(1);
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            }
+        }
+
+        .sender-card.new-sender .sender-unicorn-sparkles {
+            animation: senderSparkleRotate 4s ease-in-out;
+        }
+
+        @keyframes senderSparkleRotate {
+            0%, 100% { transform: rotate(0deg) scale(1); opacity: 1; }
+            20% { transform: rotate(72deg) scale(1.3); opacity: 0.8; }
+            40% { transform: rotate(144deg) scale(1.6); opacity: 0.9; }
+            60% { transform: rotate(216deg) scale(1.3); opacity: 0.8; }
+            80% { transform: rotate(288deg) scale(1.1); opacity: 0.7; }
+        }
+
+        .sender-card.new-sender .sender-new-badge {
+            animation: senderPulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes senderPulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.15); opacity: 0.9; }
+        }
+
+        .sender-status-badge {
+            transition: all 0.3s ease;
+        }
+
+        .sender-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .sender-card.clickable {
+            cursor: pointer;
+        }
+
+        .sender-card.clickable:hover {
+            border-color: #3b82f6;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -362,10 +438,22 @@
         <div class="bg-white rounded-lg shadow-sm">
             <!-- Email Allowlist Tab -->
             <div id="emailTabContent" class="tab-content active p-6">
-                <div class="max-w-2xl">
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4">
-                        📧 Email Allowlist
-                    </h2>
+                <div class="max-w-6xl">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h2 class="text-lg font-semibold text-gray-900 mb-2">
+                                📧 Trusted Senders
+                            </h2>
+                            <p class="text-gray-600 text-sm">Manage email addresses that are auto-approved to run code jobs</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <span id="sendersAutoUpdateIndicator" class="text-green-500 text-sm" style="display: none;">● Live</span>
+                            <button onclick="loadAllSenders()" 
+                                    class="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">
+                                🔄 Refresh
+                            </button>
+                        </div>
+                    </div>
                     
                     <div class="mb-6">
                         <div class="flex space-x-3">
@@ -385,15 +473,46 @@
                         <p class="text-sm text-gray-500 mt-2">Jobs from these senders will be automatically approved</p>
                     </div>
 
-                    <div class="mb-4">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-sm font-medium text-gray-700">Trusted Senders</h3>
-                            <span id="allowlistCount" class="text-xs text-gray-500">0 emails</span>
+                    <!-- Stats Cards -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div class="bg-gradient-to-r from-green-50 to-green-100 border border-green-200 rounded-lg p-4">
+                            <div class="flex items-center">
+                                <div class="text-green-600 text-2xl mr-3">✅</div>
+                                <div>
+                                    <div class="text-2xl font-bold text-green-800" id="trustedSendersCount">0</div>
+                                    <div class="text-sm text-green-600">Trusted Senders</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-gradient-to-r from-yellow-50 to-yellow-100 border border-yellow-200 rounded-lg p-4">
+                            <div class="flex items-center">
+                                <div class="text-yellow-600 text-2xl mr-3">⏳</div>
+                                <div>
+                                    <div class="text-2xl font-bold text-yellow-800" id="untrustedSendersCount">0</div>
+                                    <div class="text-sm text-yellow-600">Untrusted Senders</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-4">
+                            <div class="flex items-center">
+                                <div class="text-blue-600 text-2xl mr-3">📧</div>
+                                <div>
+                                    <div class="text-2xl font-bold text-blue-800" id="totalSendersCount">0</div>
+                                    <div class="text-sm text-blue-600">Total Senders</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <div id="emailList" class="space-y-2">
-                        <!-- Email list will be populated here -->
+                    <!-- Senders List -->
+                    <div class="bg-white border border-gray-200 rounded-lg">
+                        <div class="p-4 border-b border-gray-200">
+                            <h3 class="text-sm font-semibold text-gray-700">All Senders</h3>
+                            <p class="text-xs text-gray-500 mt-1">Click on untrusted senders to add them to your allowlist</p>
+                        </div>
+                        <div id="sendersContainer" class="p-4 space-y-3 max-h-96 overflow-y-auto">
+                            <!-- Senders list will be populated here -->
+                        </div>
                     </div>
                 </div>
             </div>
@@ -494,17 +613,20 @@
         // Global state
         let currentTab = 'email';
         let allowlistData = [];
+        let sendersData = [];
+        let previousSenderEmails = new Set(); // Track previously seen senders
         let jobsData = [];
         let decisionHistoryData = [];
         let previousDecisionIds = new Set(); // Track previously seen decisions
         let currentSelectedJob = null;
         let currentSelectedFile = null;
         let decisionHistoryInterval = null; // For auto-updating
+        let sendersInterval = null; // For auto-updating senders
 
         // Initialize app
         document.addEventListener('DOMContentLoaded', function() {
             loadStatus();
-            loadAllowlist();
+            loadAllSenders();
             
             // Add event listeners
             document.getElementById('addEmailButton').addEventListener('click', addEmail);
@@ -518,6 +640,9 @@
             if (decisionHistoryInterval) {
                 clearInterval(decisionHistoryInterval);
             }
+            if (sendersInterval) {
+                clearInterval(sendersInterval);
+            }
         });
 
         // Tab switching
@@ -527,9 +652,14 @@
                 clearInterval(decisionHistoryInterval);
                 decisionHistoryInterval = null;
             }
+            if (sendersInterval) {
+                clearInterval(sendersInterval);
+                sendersInterval = null;
+            }
             
-            // Hide live indicator
+            // Hide live indicators
             document.getElementById('liveIndicator').classList.add('hidden');
+            document.getElementById('sendersAutoUpdateIndicator').style.display = 'none';
             
             // Update tab buttons
             document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
@@ -538,6 +668,15 @@
             if (tab === 'email') {
                 document.getElementById('emailTab').classList.add('active');
                 document.getElementById('emailTabContent').classList.add('active');
+                loadAllSenders();
+                
+                // Show senders live indicator
+                document.getElementById('sendersAutoUpdateIndicator').style.display = 'inline';
+                
+                // Start auto-updating senders every 4 seconds
+                sendersInterval = setInterval(() => {
+                    loadAllSenders(true); // Pass true for silent update
+                }, 4000);
             } else if (tab === 'codeReview') {
                 document.getElementById('codeReviewTab').classList.add('active');
                 document.getElementById('codeReviewTabContent').classList.add('active');
@@ -573,46 +712,111 @@
         }
 
         // Email allowlist functions
-        async function loadAllowlist() {
+        async function loadAllSenders(silent = false) {
             try {
-                const response = await fetch('/api/v1/allowlist');
+                const response = await fetch('/api/v1/allowlist/senders');
+                if (!response.ok) {
+                    if (!silent) console.error('Error loading senders:', response.statusText);
+                    return;
+                }
+                
                 const data = await response.json();
-                allowlistData = data.emails || [];
-                renderAllowlist();
+                const newSenders = data.senders || [];
+                
+                // Check for new senders for unicorn animation
+                const newSenderEmails = new Set(newSenders.map(s => s.email));
+                const actuallyNewSenders = [...newSenderEmails].filter(email => !previousSenderEmails.has(email));
+                
+                // Update the previous senders set
+                previousSenderEmails = newSenderEmails;
+                
+                // Store data
+                sendersData = newSenders;
+                
+                // Render with new sender info
+                renderAllSenders(actuallyNewSenders);
+                
+                // Update stats
+                updateSendersStats(data);
+                
             } catch (error) {
-                console.error('Error loading allowlist:', error);
+                if (!silent) console.error('Error loading senders:', error);
             }
         }
 
-        function renderAllowlist() {
-            const emailList = document.getElementById('emailList');
-            const allowlistCount = document.getElementById('allowlistCount');
+        function renderAllSenders(newSenders = []) {
+            const container = document.getElementById('sendersContainer');
             
-            allowlistCount.textContent = `${allowlistData.length} emails`;
-            
-            if (allowlistData.length === 0) {
-                emailList.innerHTML = `
+            if (sendersData.length === 0) {
+                container.innerHTML = `
                     <div class="text-center py-8 text-gray-500">
                         <div class="text-2xl mb-2">📭</div>
-                        <p>No trusted senders yet</p>
-                        <p class="text-sm">Add an email address above to get started</p>
+                        <p>No senders found yet</p>
+                        <p class="text-sm">Senders will appear here after they submit jobs</p>
                     </div>
                 `;
                 return;
             }
 
-            emailList.innerHTML = allowlistData.map(email => `
-                <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
-                    <div class="flex items-center">
-                        <span class="text-green-600 mr-2">✅</span>
-                        <span class="font-medium">${email}</span>
+            container.innerHTML = sendersData.map(sender => {
+                const isNew = newSenders.includes(sender.email);
+                const isClickable = !sender.is_trusted;
+                
+                return `
+                    <div class="sender-card border rounded-lg p-4 bg-white hover:shadow-sm transition-all ${isNew ? 'new-sender' : ''} ${isClickable ? 'clickable' : ''}" 
+                         ${isClickable ? `onclick="addSenderToAllowlist('${sender.email}')"` : ''}>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                <div class="sender-status-badge ${sender.is_trusted ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'} px-2 py-1 rounded-full text-xs font-medium">
+                                    ${sender.is_trusted ? '✅ Trusted' : '⏳ Untrusted'}
+                                </div>
+                                <span class="font-medium text-gray-900">${sender.email}</span>
+                                ${isNew ? '<span class="sender-new-badge bg-purple-500 text-white text-xs px-2 py-1 rounded-full font-bold">NEW!</span>' : ''}
+                            </div>
+                            <div class="flex items-center space-x-4">
+                                ${isNew ? '<span class="sender-unicorn-sparkles text-2xl">🦄✨</span>' : ''}
+                                <div class="text-right text-sm text-gray-500">
+                                    <div class="font-medium">${sender.recent_activity} recent</div>
+                                    <div class="text-xs">
+                                        <span class="text-green-600">${sender.actions.approved}</span>
+                                        /<span class="text-yellow-600">${sender.actions.ignored}</span>
+                                        /<span class="text-red-600">${sender.actions.failed}</span>
+                                    </div>
+                                </div>
+                                ${sender.is_trusted ? `
+                                    <button onclick="event.stopPropagation(); removeSenderFromAllowlist('${sender.email}')" 
+                                            class="text-red-600 hover:text-red-800 text-sm px-3 py-1 border border-red-300 rounded hover:bg-red-50">
+                                        Remove
+                                    </button>
+                                ` : `
+                                    <button onclick="event.stopPropagation(); addSenderToAllowlist('${sender.email}')" 
+                                            class="text-blue-600 hover:text-blue-800 text-sm px-3 py-1 border border-blue-300 rounded hover:bg-blue-50">
+                                        Trust
+                                    </button>
+                                `}
+                            </div>
+                        </div>
+                        ${sender.last_seen ? `
+                            <div class="mt-2 text-xs text-gray-400">
+                                Last seen: ${new Date(sender.last_seen).toLocaleString()}
+                            </div>
+                        ` : ''}
                     </div>
-                    <button onclick="removeEmail('${email}')" 
-                            class="text-red-600 hover:text-red-800 text-sm">
-                        Remove
-                    </button>
-                </div>
-            `).join('');
+                `;
+            }).join('');
+            
+            // Clean up animations after 4 seconds
+            setTimeout(() => {
+                document.querySelectorAll('.sender-card.new-sender').forEach(card => {
+                    card.classList.remove('new-sender');
+                });
+            }, 4000);
+        }
+
+        function updateSendersStats(data) {
+            document.getElementById('trustedSendersCount').textContent = data.trusted_count || 0;
+            document.getElementById('untrustedSendersCount').textContent = data.untrusted_count || 0;
+            document.getElementById('totalSendersCount').textContent = data.total_count || 0;
         }
 
         async function addEmail() {
@@ -624,39 +828,41 @@
                 return;
             }
 
+            await addSenderToAllowlist(email);
+            emailInput.value = '';
+        }
+
+        async function addSenderToAllowlist(email) {
             try {
-                const response = await fetch('/api/v1/allowlist', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email })
+                const response = await fetch(`/api/v1/allowlist/add/${encodeURIComponent(email)}`, {
+                    method: 'POST'
                 });
 
                 if (response.ok) {
-                    emailInput.value = '';
-                    loadAllowlist();
+                    await loadAllSenders();
                 } else {
-                    alert('Error adding email');
+                    alert('Error adding email to allowlist');
                 }
             } catch (error) {
                 console.error('Error adding email:', error);
-                alert('Error adding email');
+                alert('Error adding email to allowlist');
             }
         }
 
-        async function removeEmail(email) {
+        async function removeSenderFromAllowlist(email) {
             try {
-                const response = await fetch(`/api/v1/allowlist/${encodeURIComponent(email)}`, {
+                const response = await fetch(`/api/v1/allowlist/remove/${encodeURIComponent(email)}`, {
                     method: 'DELETE'
                 });
 
                 if (response.ok) {
-                    loadAllowlist();
+                    await loadAllSenders();
                 } else {
-                    alert('Error removing email');
+                    alert('Error removing email from allowlist');
                 }
             } catch (error) {
                 console.error('Error removing email:', error);
-                alert('Error removing email');
+                alert('Error removing email from allowlist');
             }
         }
 
