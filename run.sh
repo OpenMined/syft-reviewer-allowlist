@@ -26,6 +26,18 @@ export PATH="$VIRTUAL_ENV/bin:$PATH"
 echo "📦 Installing dependencies..."
 uv sync
 
+# Start the backend API server in the background
+echo "🌐 Starting web UI backend on port ${SYFTBOX_ASSIGNED_PORT:-8002}..."
+SYFTBOX_ASSIGNED_PORT=${SYFTBOX_ASSIGNED_PORT:-8002}
+uv run uvicorn backend.main:app --host 0.0.0.0 --port $SYFTBOX_ASSIGNED_PORT &
+BACKEND_PID=$!
+
+# Ensure backend is killed on script exit
+trap 'kill $BACKEND_PID' EXIT
+
+echo "⏳ Waiting for backend to start..."
+sleep 3
+
 # Run the auto-approval service (long-running service)
 echo "🔄 Starting auto-approval service..."
 uv run python -m syft_reviewer_allowlist.app 

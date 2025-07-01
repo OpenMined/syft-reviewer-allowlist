@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syft Reviewer Allowlist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-900 flex items-center">
+                <i class="fas fa-shield-alt mr-3 text-blue-600"></i>
+                Syft Reviewer Allowlist
+            </h1>
+            <p class="text-gray-600 mt-2">Manage trusted senders for automatic job approval</p>
+        </div>
+
+        <!-- Status Card -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6" id="statusCard">
+            <h2 class="text-xl font-semibold mb-4 flex items-center">
+                <i class="fas fa-cog mr-2"></i>
+                Application Status
+            </h2>
+            <div class="grid grid-cols-2 gap-4 text-sm" id="statusContent">
+                <div class="text-gray-500">Loading status...</div>
+            </div>
+        </div>
+
+        <!-- Allowlist Management Card -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 flex items-center">
+                <i class="fas fa-users mr-2"></i>
+                Trusted Senders Allowlist
+            </h2>
+            <p class="text-gray-600 mb-4">Emails in this list will have their code jobs automatically approved</p>
+            
+            <!-- Add Email Section -->
+            <div class="flex space-x-2 mb-4">
+                <div class="flex-1">
+                    <label for="emailInput" class="block text-sm font-medium text-gray-700 mb-1">
+                        Add trusted email address
+                    </label>
+                    <input 
+                        type="email" 
+                        id="emailInput" 
+                        placeholder="trusted@example.com"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                </div>
+                <button 
+                    id="addButton"
+                    class="mt-6 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+
+            <!-- Current Allowlist -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    Current allowlist (<span id="emailCount">0</span> emails):
+                </label>
+                <div id="emailList" class="flex flex-wrap gap-2">
+                    <div class="text-gray-500 text-sm">Loading allowlist...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Help Card -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-semibold mb-4">How it works</h2>
+            <div class="space-y-2 text-sm text-gray-600">
+                <p>• The auto-approval service checks for pending code jobs every second</p>
+                <p>• Jobs from emails in the allowlist are automatically approved</p>
+                <p>• Jobs from other senders remain pending for manual review</p>
+                <p>• Changes to the allowlist take effect within 30 seconds</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allowlistEmails = [];
+        let isLoading = false;
+
+        // Load initial data
+        async function loadData() {
+            await Promise.all([loadStatus(), loadAllowlist()]);
+        }
+
+        async function loadStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const status = await response.json();
+                
+                document.getElementById('statusContent').innerHTML = `
+                    <div><span class="font-medium">Version:</span> ${status.version}</div>
+                    <div><span class="font-medium">User:</span> ${status.syftbox.user_email}</div>
+                    <div><span class="font-medium">Backend:</span> <span class="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">${status.components.backend}</span></div>
+                    <div><span class="font-medium">Allowlist:</span> <span class="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">${status.components.allowlist}</span></div>
+                `;
+            } catch (error) {
+                console.error('Failed to load status:', error);
+                document.getElementById('statusContent').innerHTML = '<div class="text-red-500">Failed to load status</div>';
+            }
+        }
+
+        async function loadAllowlist() {
+            try {
+                const response = await fetch('/api/v1/allowlist');
+                const data = await response.json();
+                allowlistEmails = data.emails;
+                updateEmailList();
+            } catch (error) {
+                console.error('Failed to load allowlist:', error);
+                document.getElementById('emailList').innerHTML = '<div class="text-red-500 text-sm">Failed to load allowlist</div>';
+            }
+        }
+
+        function updateEmailList() {
+            const emailList = document.getElementById('emailList');
+            const emailCount = document.getElementById('emailCount');
+            
+            emailCount.textContent = allowlistEmails.length;
+
+            if (allowlistEmails.length === 0) {
+                emailList.innerHTML = '<p class="text-gray-500 text-sm">No trusted emails configured. Add one above to get started.</p>';
+            } else {
+                emailList.innerHTML = allowlistEmails.map(email => `
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-800">
+                        ${email}
+                        <button onclick="removeEmail('${email}')" class="ml-2 text-red-500 hover:text-red-700">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </span>
+                `).join('');
+            }
+        }
+
+        async function addEmail() {
+            const emailInput = document.getElementById('emailInput');
+            const email = emailInput.value.trim();
+            
+            if (!email || allowlistEmails.includes(email) || isLoading) return;
+
+            setLoading(true);
+            try {
+                const updatedList = [...allowlistEmails, email];
+                await updateAllowlist(updatedList);
+                allowlistEmails = updatedList;
+                emailInput.value = '';
+                updateEmailList();
+            } catch (error) {
+                console.error('Failed to add email:', error);
+                alert('Failed to add email. Please try again.');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function removeEmail(email) {
+            if (isLoading) return;
+            
+            setLoading(true);
+            try {
+                const updatedList = allowlistEmails.filter(e => e !== email);
+                await updateAllowlist(updatedList);
+                allowlistEmails = updatedList;
+                updateEmailList();
+            } catch (error) {
+                console.error('Failed to remove email:', error);
+                alert('Failed to remove email. Please try again.');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function updateAllowlist(emails) {
+            const response = await fetch('/api/v1/allowlist', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(emails),
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to update allowlist');
+            }
+        }
+
+        function setLoading(loading) {
+            isLoading = loading;
+            const addButton = document.getElementById('addButton');
+            if (loading) {
+                addButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                addButton.disabled = true;
+            } else {
+                addButton.innerHTML = '<i class="fas fa-plus"></i>';
+                addButton.disabled = false;
+            }
+        }
+
+        // Event listeners
+        document.getElementById('addButton').addEventListener('click', addEmail);
+        document.getElementById('emailInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addEmail();
+        });
+
+        // Load data on page load
+        loadData();
+    </script>
+</body>
+</html> 

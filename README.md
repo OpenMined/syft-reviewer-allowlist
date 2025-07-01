@@ -16,10 +16,19 @@ This SyftBox app continuously monitors for pending code execution jobs and autom
 
 ## Configuration
 
-The app is configured with the following trusted sender:
-- `andrew@openmined.org`
+The app now includes a web-based interface for managing the allowlist! 
 
-To add more trusted senders, modify the `TRUSTED_SENDERS` list in `src/syft_reviewer_allowlist/app.py`.
+**Default Configuration:**
+- Starts with `andrew@openmined.org` in the allowlist
+- Web UI available at the app's assigned port
+- Changes take effect within 30 seconds
+
+**Web Interface:**
+Access the allowlist management UI through your SyftBox app's assigned port to:
+- View current trusted senders
+- Add new email addresses
+- Remove existing entries
+- See real-time application status
 
 ## Usage
 

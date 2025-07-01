@@ -45,38 +45,74 @@ except ImportError:
     logger.error("syft-code-queue not available - this is required for the app to function")
     sys.exit(1)
 
+# Import our backend utils for allowlist management
+try:
+    import sys
+    import os
+    # Add the backend directory to the Python path
+    backend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "backend")
+    sys.path.insert(0, backend_path)
+    from utils import get_allowlist
+except ImportError:
+    log_to_syftui("⚠️ Backend utils not available - using default allowlist", "WARN")
+    get_allowlist = None
+
 
 class ReviewerAllowlistApp:
     """App that automatically approves jobs from trusted senders."""
     
-    def __init__(self, allowlist: List[str], poll_interval: int = 1):
+    def __init__(self, poll_interval: int = 1):
         """
         Initialize the app.
         
         Args:
-            allowlist: List of trusted email addresses
             poll_interval: Seconds between polling cycles
         """
         try:
             self.syftbox_client = SyftBoxClient.load()
-            self.allowlist = allowlist
             self.poll_interval = poll_interval
+            self.allowlist = self._load_allowlist()
             
             log_to_syftui(f"✅ Initialized Reviewer Allowlist App for {self.email}")
-            log_to_syftui(f"📝 Trusted senders: {', '.join(allowlist)}")
+            log_to_syftui(f"📝 Trusted senders: {', '.join(self.allowlist)}")
             log_to_syftui(f"⏰ Polling every {poll_interval} second(s)")
             
         except Exception as e:
             log_to_syftui(f"❌ Could not initialize Reviewer Allowlist App: {e}", "ERROR")
             # Set up in demo mode
             self.syftbox_client = SyftBoxClient()
-            self.allowlist = allowlist
             self.poll_interval = poll_interval
+            self.allowlist = ["andrew@openmined.org"]  # Fallback default
     
     @property
     def email(self) -> str:
         """Get the current user's email."""
         return self.syftbox_client.email
+    
+    def _load_allowlist(self) -> List[str]:
+        """Load the allowlist from the saved file."""
+        try:
+            if get_allowlist is not None:
+                allowlist = get_allowlist(self.syftbox_client)
+                log_to_syftui(f"📂 Loaded allowlist from file: {allowlist}")
+                return allowlist
+            else:
+                log_to_syftui("⚠️ Using fallback allowlist", "WARN")
+                return ["andrew@openmined.org"]
+        except Exception as e:
+            log_to_syftui(f"❌ Error loading allowlist, using default: {e}", "ERROR")
+            return ["andrew@openmined.org"]
+    
+    def _refresh_allowlist(self):
+        """Refresh the allowlist from the file."""
+        try:
+            new_allowlist = self._load_allowlist()
+            if new_allowlist != self.allowlist:
+                old_list = self.allowlist.copy()
+                self.allowlist = new_allowlist
+                log_to_syftui(f"🔄 Allowlist updated: {old_list} → {new_allowlist}")
+        except Exception as e:
+            log_to_syftui(f"❌ Error refreshing allowlist: {e}", "ERROR")
     
     def run(self):
         """
@@ -117,6 +153,10 @@ class ReviewerAllowlistApp:
         # Log cycle number periodically (every 60 cycles = 1 minute at 1s intervals)
         if cycle % 60 == 0:
             log_to_syftui(f"⏰ Polling cycle {cycle} - checking for pending jobs...")
+        
+        # Refresh allowlist every 30 seconds (30 cycles at 1s intervals)
+        if cycle % 30 == 0:
+            self._refresh_allowlist()
         
         # Check for pending jobs and auto-approve from allowlist
         self._auto_approve_from_allowlist()
@@ -180,18 +220,13 @@ class ReviewerAllowlistApp:
 def main():
     """Main entry point for the SyftBox app."""
     
-    # Configure the allowlist - you can modify this list
-    TRUSTED_SENDERS = [
-        "andrew@openmined.org",
-        # Add more trusted email addresses here if needed
-    ]
-    
     log_to_syftui("🤖 Syft Reviewer Allowlist - Auto-approval Service")
     log_to_syftui("=" * 60)
+    log_to_syftui("📝 Allowlist is now managed via the web UI")
+    log_to_syftui("🌐 Access the UI at your app's assigned port")
     
     try:
         app = ReviewerAllowlistApp(
-            allowlist=TRUSTED_SENDERS,
             poll_interval=1  # Check every second
         )
         app.run()
