@@ -15,6 +15,15 @@ from typing import List, Optional
 
 from loguru import logger
 
+# Configure loguru to output to stdout for SyftUI logs
+logger.remove()  # Remove default handler
+logger.add(sys.stdout, format="{time:HH:mm:ss}\t{level}\t{message}", level="INFO")
+
+def log_to_syftui(message: str, level: str = "INFO"):
+    """Ensure logs appear in SyftUI by using both print and loguru."""
+    print(f"{datetime.now().strftime('%H:%M:%S')}\t{level}\t{message}")
+    sys.stdout.flush()  # Force immediate output
+
 try:
     from syft_core import Client as SyftBoxClient
 except ImportError:
@@ -53,12 +62,12 @@ class ReviewerAllowlistApp:
             self.allowlist = allowlist
             self.poll_interval = poll_interval
             
-            logger.info(f"✅ Initialized Reviewer Allowlist App for {self.email}")
-            logger.info(f"📝 Trusted senders: {', '.join(allowlist)}")
-            logger.info(f"⏰ Polling every {poll_interval} second(s)")
+            log_to_syftui(f"✅ Initialized Reviewer Allowlist App for {self.email}")
+            log_to_syftui(f"📝 Trusted senders: {', '.join(allowlist)}")
+            log_to_syftui(f"⏰ Polling every {poll_interval} second(s)")
             
         except Exception as e:
-            logger.error(f"❌ Could not initialize Reviewer Allowlist App: {e}")
+            log_to_syftui(f"❌ Could not initialize Reviewer Allowlist App: {e}", "ERROR")
             # Set up in demo mode
             self.syftbox_client = SyftBoxClient()
             self.allowlist = allowlist
@@ -73,12 +82,12 @@ class ReviewerAllowlistApp:
         """
         Start continuous job polling and auto-approval.
         """
-        logger.info(f"🔄 Starting continuous job polling...")
-        logger.info(f"⏰ Checking every {self.poll_interval} second(s) for jobs from trusted senders")
+        log_to_syftui(f"🔄 Starting continuous job polling...")
+        log_to_syftui(f"⏰ Checking every {self.poll_interval} second(s) for jobs from trusted senders")
         
         # Set up graceful shutdown
         def signal_handler(signum, frame):
-            logger.info("👋 Shutting down gracefully...")
+            log_to_syftui("👋 Shutting down gracefully...")
             sys.exit(0)
         
         signal.signal(signal.SIGINT, signal_handler)
@@ -95,10 +104,10 @@ class ReviewerAllowlistApp:
                 sleep(self.poll_interval)
             
             except KeyboardInterrupt:
-                logger.info("👋 Shutting down...")
+                log_to_syftui("👋 Shutting down...")
                 break
             except Exception as e:
-                logger.error(f"❌ Error in processing cycle {cycle}: {e}")
+                log_to_syftui(f"❌ Error in processing cycle {cycle}: {e}", "ERROR")
                 # Continue running despite errors
                 sleep(self.poll_interval)
     
@@ -107,7 +116,7 @@ class ReviewerAllowlistApp:
         
         # Log cycle number periodically (every 60 cycles = 1 minute at 1s intervals)
         if cycle % 60 == 0:
-            logger.info(f"⏰ Polling cycle {cycle} - checking for pending jobs...")
+            log_to_syftui(f"⏰ Polling cycle {cycle} - checking for pending jobs...")
         
         # Check for pending jobs and auto-approve from allowlist
         self._auto_approve_from_allowlist()
@@ -122,23 +131,23 @@ class ReviewerAllowlistApp:
                 # Don't log when no jobs - too verbose for continuous polling
                 return
             
-            logger.info(f"📋 Found {len(pending_jobs)} job(s) pending approval")
+            log_to_syftui(f"📋 Found {len(pending_jobs)} job(s) pending approval")
             
             # Filter jobs from allowlisted senders
             trusted_jobs = []
             for job in pending_jobs:
                 if job.requester_email in self.allowlist:
                     trusted_jobs.append(job)
-                    logger.info(f"✅ Job '{job.name}' from {job.requester_email} - TRUSTED")
+                    log_to_syftui(f"✅ Job '{job.name}' from {job.requester_email} - TRUSTED")
                 else:
-                    logger.info(f"⚠️  Job '{job.name}' from {job.requester_email} - NOT IN ALLOWLIST")
+                    log_to_syftui(f"⚠️  Job '{job.name}' from {job.requester_email} - NOT IN ALLOWLIST")
             
             if not trusted_jobs:
                 if len(pending_jobs) > 0:
-                    logger.info("🚫 No jobs from trusted senders found")
+                    log_to_syftui("🚫 No jobs from trusted senders found")
                 return
             
-            logger.info(f"🚀 Auto-approving {len(trusted_jobs)} job(s) from trusted senders...")
+            log_to_syftui(f"🚀 Auto-approving {len(trusted_jobs)} job(s) from trusted senders...")
             
             # Auto-approve trusted jobs
             approved_count = 0
@@ -151,21 +160,21 @@ class ReviewerAllowlistApp:
                     
                     if success:
                         approved_count += 1
-                        logger.info(f"✅ Approved: '{job.name}' from {job.requester_email}")
+                        log_to_syftui(f"✅ Approved: '{job.name}' from {job.requester_email}")
                     else:
                         failed_count += 1
-                        logger.error(f"❌ Failed to approve: '{job.name}' from {job.requester_email}")
+                        log_to_syftui(f"❌ Failed to approve: '{job.name}' from {job.requester_email}", "ERROR")
                         
                 except Exception as e:
                     failed_count += 1
-                    logger.error(f"❌ Error approving '{job.name}': {e}")
+                    log_to_syftui(f"❌ Error approving '{job.name}': {e}", "ERROR")
             
             # Log summary
             if approved_count > 0 or failed_count > 0:
-                logger.info(f"📊 Summary: {approved_count} approved, {failed_count} failed")
+                log_to_syftui(f"📊 Summary: {approved_count} approved, {failed_count} failed")
             
         except Exception as e:
-            logger.error(f"❌ Error during auto-approval check: {e}")
+            log_to_syftui(f"❌ Error during auto-approval check: {e}", "ERROR")
 
 
 def main():
@@ -177,8 +186,8 @@ def main():
         # Add more trusted email addresses here if needed
     ]
     
-    logger.info("🤖 Syft Reviewer Allowlist - Auto-approval Service")
-    logger.info("=" * 60)
+    log_to_syftui("🤖 Syft Reviewer Allowlist - Auto-approval Service")
+    log_to_syftui("=" * 60)
     
     try:
         app = ReviewerAllowlistApp(
@@ -188,7 +197,7 @@ def main():
         app.run()
         
     except Exception as e:
-        logger.error(f"❌ App failed: {e}")
+        log_to_syftui(f"❌ App failed: {e}", "ERROR")
         sys.exit(1)
 
 
