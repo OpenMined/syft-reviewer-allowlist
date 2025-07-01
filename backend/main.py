@@ -335,16 +335,45 @@ async def add_email_endpoint(
 async def remove_email_endpoint(
     email: str = Path(..., description="Email address to remove"),
     client: Client = Depends(get_client),
+    force: bool = False  # Add force parameter for power users
 ) -> MessageResponse:
     """Remove a single email from the allowlist."""
     try:
+        # Get current allowlist
+        current_allowlist = get_allowlist(client)
+        logger.info(f"Current allowlist before removal: {current_allowlist}")
+        
+        # Safety check: prevent removing the last email unless forced
+        if len(current_allowlist) <= 1 and not force:
+            logger.warning(f"Attempted to remove last email {email} from allowlist (blocked for safety)")
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot remove the last email from allowlist. Add another trusted sender first, or use ?force=true to override this safety check."
+            )
+        
+        # Check if email is actually in the allowlist
+        if email.strip() not in current_allowlist:
+            logger.warning(f"Attempted to remove {email} but it's not in allowlist: {current_allowlist}")
+            raise HTTPException(status_code=404, detail=f"Email {email} is not in the allowlist")
+        
+        # Remove the email
         remove_email_from_allowlist(client, email.strip())
-        logger.info(f"Removed {email} from allowlist")
+        logger.info(f"Successfully removed {email} from allowlist")
+        
+        # Verify removal
+        updated_allowlist = get_allowlist(client)
+        logger.info(f"Updated allowlist after removal: {updated_allowlist}")
+        
+        if email.strip() in updated_allowlist:
+            logger.error(f"Email {email} still in allowlist after removal attempt!")
+            raise HTTPException(status_code=500, detail=f"Email {email} was not successfully removed from allowlist")
         
         return MessageResponse(message=f"Email {email} removed from allowlist")
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
         logger.error(f"Error removing {email} from allowlist: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to remove {email} from allowlist")
+        raise HTTPException(status_code=500, detail=f"Failed to remove {email} from allowlist: {str(e)}")
 
 
 @app.get(

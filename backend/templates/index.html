@@ -862,6 +862,28 @@
                     const result = await response.json();
                     console.log('Successfully untrusted:', result);
                     await loadAllSenders();
+                } else if (response.status === 400) {
+                    // Handle safety check for last email
+                    const errorData = await response.json();
+                    const confirmMessage = `${errorData.detail}\n\nDo you really want to remove the last trusted sender? This will require manual approval of all future jobs.`;
+                    
+                    if (confirm(confirmMessage)) {
+                        // Retry with force=true
+                        const forceResponse = await fetch(`/api/v1/allowlist/remove/${encodeURIComponent(email)}?force=true`, {
+                            method: 'DELETE'
+                        });
+                        
+                        if (forceResponse.ok) {
+                            const result = await forceResponse.json();
+                            console.log('Force removed last trusted sender:', result);
+                            await loadAllSenders();
+                            alert('⚠️ Removed last trusted sender. All future jobs will require manual approval.');
+                        } else {
+                            const errorText = await forceResponse.text();
+                            console.error('Failed to force remove:', forceResponse.status, errorText);
+                            alert(`Error force removing email: ${forceResponse.status} - ${errorText}`);
+                        }
+                    }
                 } else {
                     const errorText = await response.text();
                     console.error('Failed to untrust email:', response.status, errorText);
