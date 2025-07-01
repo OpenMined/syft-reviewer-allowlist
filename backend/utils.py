@@ -67,6 +67,11 @@ def get_job_history_dir_path(client: Client) -> Path:
     return client.app_data("syft-reviewer-allowlist") / "job_history"
 
 
+def get_decision_history_dir_path(client: Client) -> Path:
+    """Get the path to the decision history directory."""
+    return client.app_data("syft-reviewer-allowlist") / "decision_history"
+
+
 def calculate_job_signature(job_data: Dict[str, Any]) -> str:
     """
     Calculate a unique signature for a job based on its content.
@@ -598,4 +603,145 @@ def get_email_file_info(client: Client, email: str) -> dict:
         return content
     except Exception as e:
         logger.error(f"Error reading email file for {email}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to read email file") 
+        raise HTTPException(status_code=500, detail="Failed to read email file")
+
+
+# Decision History Functions
+
+def store_decision(client: Client, decision_data: Dict[str, Any]) -> str:
+    """
+    Store a decision in the decision history.
+    
+    Args:
+        client: SyftBox client
+        decision_data: Dictionary containing decision information
+    
+    Returns:
+        Decision ID
+    """
+    decision_dir = get_decision_history_dir_path(client)
+    decision_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate decision ID with timestamp
+    decision_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    decision_file = decision_dir / f"{decision_id}.json"
+    
+    # Add metadata
+    stored_data = {
+        **decision_data,
+        "decision_id": decision_id,
+        "timestamp": datetime.now().isoformat(),
+    }
+    
+    try:
+        # Write decision data to file
+        with open(decision_file, 'w') as f:
+            json.dump(_serialize_for_json(stored_data), f, indent=2)
+        
+        logger.info(f"📋 Stored decision: {decision_data.get('action', 'unknown')} for job {decision_data.get('job_name', 'unknown')}")
+        return decision_id
+        
+    except Exception as e:
+        logger.error(f"Error storing decision: {e}")
+        raise
+
+
+def get_decision_history(client: Client, limit: int = 100) -> List[Dict[str, Any]]:
+    """
+    Get the decision history, sorted by most recent first.
+    
+    Args:
+        client: SyftBox client
+        limit: Maximum number of decisions to return
+    
+    Returns:
+        List of decision records
+    """
+    decision_dir = get_decision_history_dir_path(client)
+    
+    if not decision_dir.exists():
+        return []
+    
+    decisions = []
+    
+    # Get all decision files, sorted by modification time (newest first)
+    decision_files = sorted(
+        decision_dir.glob("*.json"),
+        key=lambda x: x.stat().st_mtime,
+        reverse=True
+    )
+    
+    for decision_file in decision_files[:limit]:
+        try:
+            with open(decision_file) as f:
+                decision_data = json.load(f)
+                decisions.append(decision_data)
+        except Exception as e:
+            logger.warning(f"Could not load decision file {decision_file.name}: {e}")
+    
+    return decisions
+
+
+def log_job_decision(client: Client, job_data: Dict[str, Any], action: str, reason: str, details: Dict[str, Any] = None) -> None:
+    """
+    Log a decision made about a job.
+    
+    Args:
+        client: SyftBox client
+        job_data: Job information
+        action: Action taken (approve, deny, ignore)
+        reason: Reason for the decision
+        details: Additional details about the decision
+    """
+    try:
+        decision_data = {
+            "action": action,
+            "reason": reason,
+            "job_name": job_data.get("name", "Unknown"),
+            "job_uid": job_data.get("uid", ""),
+            "job_signature": job_data.get("signature", ""),
+            "requester_email": job_data.get("requester_email", ""),
+            "job_description": job_data.get("description", ""),
+            "job_tags": job_data.get("tags", []),
+            "file_count": len(job_data.get("code_files", {})) if isinstance(job_data.get("code_files"), dict) else len(job_data.get("code_files", [])),
+        }
+        
+        if details:
+            decision_data["details"] = details
+        
+        store_decision(client, decision_data)
+        
+    except Exception as e:
+        logger.error(f"Error logging job decision: {e}")
+
+
+def clear_old_decisions(client: Client, keep_days: int = 30) -> int:
+    """
+    Clear old decision history entries.
+    
+    Args:
+        client: SyftBox client
+        keep_days: Number of days to keep
+    
+    Returns:
+        Number of decisions cleared
+    """
+    decision_dir = get_decision_history_dir_path(client)
+    
+    if not decision_dir.exists():
+        return 0
+    
+    from datetime import timedelta
+    cutoff_time = datetime.now() - timedelta(days=keep_days)
+    cleared_count = 0
+    
+    for decision_file in decision_dir.glob("*.json"):
+        try:
+            file_time = datetime.fromtimestamp(decision_file.stat().st_mtime)
+            if file_time < cutoff_time:
+                decision_file.unlink()
+                cleared_count += 1
+        except Exception as e:
+            logger.warning(f"Could not clear old decision file {decision_file.name}: {e}")
+    
+    return cleared_count 

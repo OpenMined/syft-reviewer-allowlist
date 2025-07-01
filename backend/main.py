@@ -33,7 +33,11 @@ from .utils import (
     mark_job_as_trusted_code,
     unmark_job_as_trusted_code,
     is_job_trusted_code,
-    calculate_job_signature
+    calculate_job_signature,
+    # Decision history functions
+    get_decision_history,
+    log_job_decision,
+    clear_old_decisions
 )
 
 try:
@@ -693,6 +697,56 @@ async def refresh_job_content(client: Client = Depends(get_client)):
     except Exception as e:
         logger.error(f"Error refreshing job content: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to refresh content: {str(e)}")
+
+
+# Decision History Endpoints
+
+@app.get(
+    "/api/v1/decisions/history",
+    tags=["decisions", "admin"],
+    summary="Get decision history",
+    description="Get the history of decisions made by the auto-approval system"
+)
+async def get_decision_history_endpoint(
+    limit: int = 100,
+    client: Client = Depends(get_client),
+) -> Dict[str, Any]:
+    """Get the decision history."""
+    try:
+        decisions = get_decision_history(client, limit=limit)
+        
+        return {
+            "decisions": decisions,
+            "total_count": len(decisions)
+        }
+    
+    except Exception as e:
+        logger.error(f"Error getting decision history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get decision history: {str(e)}")
+
+
+@app.delete(
+    "/api/v1/decisions/history/clear",
+    response_model=MessageResponse,
+    tags=["decisions", "admin"],
+    summary="Clear old decision history",
+    description="Clear decision history older than specified days"
+)
+async def clear_decision_history_endpoint(
+    keep_days: int = 30,
+    client: Client = Depends(get_client),
+) -> MessageResponse:
+    """Clear old decision history."""
+    try:
+        cleared_count = clear_old_decisions(client, keep_days=keep_days)
+        
+        return MessageResponse(
+            message=f"Cleared {cleared_count} decision record(s) older than {keep_days} days"
+        )
+    
+    except Exception as e:
+        logger.error(f"Error clearing decision history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear decision history: {str(e)}")
 
 
 # Serve the HTML interface

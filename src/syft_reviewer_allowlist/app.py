@@ -52,12 +52,13 @@ try:
     # Add the backend directory to the Python path
     backend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "backend")
     sys.path.insert(0, backend_path)
-    from utils import get_allowlist, is_job_trusted_code, store_job_in_history
+    from utils import get_allowlist, is_job_trusted_code, store_job_in_history, log_job_decision
 except ImportError:
     log_to_syftui("⚠️ Backend utils not available - using basic functionality", "WARN")
     get_allowlist = None
     is_job_trusted_code = None
     store_job_in_history = None
+    log_job_decision = None
 
 
 class ReviewerAllowlistApp:
@@ -407,6 +408,20 @@ class ReviewerAllowlistApp:
                     untrusted_jobs.append(job)
                     if verbose_logging:
                         log_to_syftui(f"⚠️  Job '{job.name}' from {job.requester_email} - NOT IN ALLOWLIST OR TRUSTED CODE")
+                    
+                    # Log the ignore decision
+                    if log_job_decision is not None:
+                        try:
+                            job_data = self._extract_job_data(job)
+                            log_job_decision(
+                                self.syftbox_client,
+                                job_data,
+                                "ignore",
+                                f"Not in allowlist and no trusted code pattern match - sender: {job.requester_email}",
+                                {"auto_processed": True, "ignored_reason": "not_trusted"}
+                            )
+                        except Exception as e:
+                            log_to_syftui(f"⚠️ Failed to log ignore decision for '{job.name}': {e}", "WARN")
             
             # Log summary if no approvals but jobs exist
             if not email_approved_jobs and not trusted_code_jobs:
@@ -459,6 +474,21 @@ class ReviewerAllowlistApp:
         try:
             approval_reason = f"Auto-approved ({reason}) at {datetime.now().isoformat()}"
             success = job.approve(approval_reason)
+            
+            # Log the decision
+            if log_job_decision is not None:
+                try:
+                    job_data = self._extract_job_data(job)
+                    action = "approve" if success else "failed_approval"
+                    log_job_decision(
+                        self.syftbox_client,
+                        job_data,
+                        action,
+                        approval_reason,
+                        {"success": success, "auto_approved": True}
+                    )
+                except Exception as e:
+                    log_to_syftui(f"⚠️ Failed to log decision for '{job.name}': {e}", "WARN")
             
             if success:
                 log_to_syftui(f"✅ Approved: '{job.name}' from {job.requester_email} ({reason})")
