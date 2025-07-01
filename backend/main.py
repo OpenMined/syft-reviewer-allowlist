@@ -401,6 +401,9 @@ async def get_all_senders_endpoint(
         allowlist = get_allowlist(client)
         allowlist_set = set(allowlist)
         
+        # Add all allowlist emails to the list (even if they haven't submitted jobs yet)
+        all_emails.update(allowlist)
+        
         # Create sender info
         senders = []
         for email in sorted(all_emails):
